@@ -50,7 +50,7 @@
 
     <main id="main">
       <aside id="left-panel" class="panel">
-        <div class="panel-header">hierarchy</div>
+        <div class="panel-header">objetos na cena</div>
         <div id="outliner" class="outliner"></div>
       </aside>
 
@@ -61,16 +61,16 @@
           <div id="hud-selection" class="hud-line"></div>
         </div>
         <div id="viewport-help" class="viewport-help">
-          <div>drag to orbit · right-drag to pan · scroll to zoom</div>
-          <div><kbd>W</kbd> translate · <kbd>E</kbd> rotate · <kbd>R</kbd> scale · <kbd>F</kbd> frame · <kbd>Del</kbd> delete</div>
+          <div>arraste para orbitar · botão direito para mover · scroll para zoom</div>
+          <div><kbd>W</kbd> mover · <kbd>E</kbd> girar · <kbd>R</kbd> escalar · <kbd>F</kbd> focar · <kbd>Del</kbd> apagar</div>
         </div>
         <div id="toast-stack"></div>
       </section>
 
       <aside id="right-panel" class="panel">
-        <div class="panel-header">inspector</div>
+        <div class="panel-header">propriedades</div>
         <div id="inspector" class="inspector">
-          <div class="empty">no object selected</div>
+          <div class="empty">nenhum objeto selecionado</div>
         </div>
       </aside>
     </main>
@@ -81,19 +81,19 @@
           <button id="tab-search" class="asset-tab active" data-clag-action="tab-search" role="tab" aria-selected="true">buscar</button>
           <button id="tab-catalog" class="asset-tab" data-clag-action="tab-catalog" role="tab" aria-selected="false">catálogo</button>
         </div>
-        <span id="bottom-hint" class="bottom-hint">drag a result onto the viewport · or double-click</span>
+        <span id="bottom-hint" class="bottom-hint">arraste um resultado para a cena · ou clique duplo</span>
       </div>
       <div id="search-pane" class="asset-pane">
         <div class="search-bar">
-          <input id="search-input" type="text" placeholder="search 3d assets… (e.g. tree, rock, chair)" autocomplete="off" data-clag-action="search-input" />
+          <input id="search-input" type="text" placeholder="buscar assets 3d… (ex: árvore, pedra, cadeira)" autocomplete="off" data-clag-action="search-input" />
           <div class="select-wrap">
-            <button id="provider-btn" class="select-btn" data-clag-action="provider-menu-toggle"><span id="provider-label">all providers</span> <span class="caret">▾</span></button>
+            <button id="provider-btn" class="select-btn" data-clag-action="provider-menu-toggle"><span id="provider-label">todos os providers</span> <span class="caret">▾</span></button>
             <div id="provider-menu" class="select-menu hidden"></div>
           </div>
-          <button id="search-btn" class="btn primary" data-clag-action="search-run">search</button>
+          <button id="search-btn" class="btn primary" data-clag-action="search-run">buscar</button>
         </div>
         <div id="results" class="results">
-          <div class="hint">type a query and press <kbd>Enter</kbd>. drag a result onto the viewport to add it to the scene.</div>
+          <div class="hint">busque acima para ver resultados aqui. arraste um resultado para a cena para adicioná-lo.</div>
         </div>
       </div>
       <div id="catalog-pane" class="asset-pane hidden">

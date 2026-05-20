@@ -1,6 +1,6 @@
 # PROGRESS — clag
 
-Última atualização: 2026-05-20 (Fase 0 e 1 do SIMS-MODE entregues — api programática + catálogo semântico)
+Última atualização: 2026-05-20 (Fase 0 e 1 do SIMS-MODE entregues — api programática + catálogo semântico; patch pós-revisão PM/QA: i18n PT-BR + actions.setProvider + runSearch renderizando grade)
 
 ## como usar este arquivo
 
@@ -63,6 +63,7 @@ Resumo — detalhe em PRINCIPLES.md:
 
 ## histórico
 
+- **2026-05-20 (patch pós-revisão Fase 0+1)**: `search.js` exporta `runSearchUI` / `setActiveProvider` / `getActiveProvider`; `api.js` agora delega `actions.runSearch` à UI (grade visual atualiza) e expõe `actions.setProvider` + `state.activeProvider` — fecha bugs 1 e 2 do QA. i18n PT-BR aplicado em placeholder/hint/toasts/menu de provider/HUD/help de viewport. `catalog.js`: queries de ~21 folhas simplificadas pra 1 palavra (`'house plant pot'` → `'plant'`, `'kitchen sink'` → `'sink'`, etc.) — catálogo guiado deixa de cair só em Sketchfab.
 - **2026-05-20**: SIMS-MODE Fase 0 + Fase 1 entregues. Fase 0: `public/src/api.js` expõe `window.clag = { actions, state }`, `data-clag-action` em todos os botões. Fase 1: `public/src/catalog.js` com árvore de 6 categorias (Sala, Cozinha, Quarto, Banheiro, Escritório, Exterior), aba "Catálogo" no asset browser coexistindo com "Buscar". Click em folha dispara `searchAll(query)`. Comportamento existente intacto.
 
 - **2026-05-19**: init do repo. Conteúdo herdado de `~/ved/random-experiments/scene-ide/` v2. Branding atualizada (scene-ide → clag em title, brand, toast, localStorage keys, dataTransfer types). Docs reescritos pra repo standalone. Agente revisor rodou e levantou 5 ações, todas aplicadas no commit imediatamente seguinte.

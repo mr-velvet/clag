@@ -5,7 +5,10 @@ import {
 import { addCube, addSphere, addPlane, addPointLight } from './primitives.js';
 import { initOutliner } from './outliner.js';
 import { initInspector } from './inspector.js';
-import { initSearch, getLastResults, setLastResults, downloadAndPlace } from './search.js';
+import {
+  initSearch, getLastResults, setLastResults, downloadAndPlace,
+  runSearchUI, setActiveProvider, getActiveProvider,
+} from './search.js';
 import { initCatalogUI, searchCategory, showTab, expandCategory, collapseCategory, getExpandedCategories } from './catalog-ui.js';
 import { getTree, getLeaf } from './catalog.js';
 import { initToast, toast } from './toast.js';
@@ -50,12 +53,12 @@ $('btn-add-light').addEventListener('click', addPointLight);
 $('btn-delete').addEventListener('click', () => {
   const s = getSelected();
   if (s) removeFromScene(s);
-  else toast('nothing selected', { kind: 'warn' });
+  else toast('nada selecionado', { kind: 'warn' });
 });
 $('btn-duplicate').addEventListener('click', () => {
   const s = getSelected();
   if (s) duplicateObject(s);
-  else toast('nothing selected', { kind: 'warn' });
+  else toast('nada selecionado', { kind: 'warn' });
 });
 
 // mode buttons
@@ -76,12 +79,12 @@ on('selectionChanged', syncModeButtons);
 // save / load
 $('btn-save').addEventListener('click', () => {
   const data = saveSceneToLocal();
-  toast(`saved ${data.objects.length} objects`, { kind: 'success' });
+  toast(`${data.objects.length} objetos salvos`, { kind: 'success' });
 });
 $('btn-load').addEventListener('click', async () => {
   const ok = await restoreSceneFromLocal(addPrimitiveByKind, downloadAndPlaceFromMeta);
-  if (ok) toast('scene loaded', { kind: 'success' });
-  else toast('no saved scene', { kind: 'warn' });
+  if (ok) toast('cena carregada', { kind: 'success' });
+  else toast('nenhuma cena salva', { kind: 'warn' });
 });
 
 function addPrimitiveByKind(kind) {
@@ -122,7 +125,7 @@ on('statsTick', s => {
 });
 on('selectionChanged', sel => {
   if (!sel) { hudSelection.textContent = ''; return; }
-  hudSelection.textContent = `selected: ${sel.name || sel.userData.sceneId}`;
+  hudSelection.textContent = `selecionado: ${sel.name || sel.userData.sceneId}`;
 });
 
 function formatTris(n) {
@@ -145,7 +148,7 @@ cube.position.set(-1.4, 0.5, 0);
 const sphere = addSphere();
 sphere.position.set(1.4, 0.6, 0);
 
-// deseleciona pra inspector mostrar "no object selected" no boot
+// deseleciona pra inspector mostrar "nenhum objeto selecionado" no boot
 setSelected(null);
 
 // expoe api programatica (window.clag) — Fase 0 + Fase 1 Sims-mode
@@ -154,6 +157,9 @@ initApi({
   downloadAndPlace,
   getLastResults,
   setLastResults,
+  runSearchUI,
+  setActiveProvider,
+  getActiveProvider,
   save: () => saveSceneToLocal(),
   load: async () => await restoreSceneFromLocal(addPrimitiveByKind, downloadAndPlaceFromMeta),
   // catalogo
@@ -164,4 +170,4 @@ initApi({
   catalogShowTab: showTab,
 });
 
-toast('clag loaded — drag to orbit · click objects to select', { timeout: 4500 });
+toast('clag carregado — arraste para orbitar · clique em objetos para selecionar', { timeout: 4500 });

@@ -12,6 +12,34 @@ export function getLastResults() { return lastResults; }
 export function setLastResults(items) { lastResults = items; }
 export { downloadAndPlace };
 
+// expoe pra api.js: dirige a UI da aba Buscar (input, provider, render)
+// asim a API espelha exatamente o caminho UI — fecha bug 1 do QA.
+export async function runSearchUI(query, providerId) {
+  if (typeof query === 'string' && DOM.input) {
+    DOM.input.value = query;
+  }
+  if (providerId !== undefined && providerId !== null) {
+    setActiveProvider(providerId);
+  }
+  return await runSearch();
+}
+
+// expoe pra api.js: troca o provider ativo, atualiza label e menu da UI.
+// fecha bug 2 do QA — botao #provider-btn agora tem equivalente programatico.
+export function setActiveProvider(id) {
+  const valid = id === 'all' || providers.some(p => p.id === id);
+  if (!valid) throw new Error(`provider invalido: ${id}`);
+  activeProviderId = id;
+  if (DOM.providerLabel) {
+    const label = id === 'all' ? 'todos os providers' : (providerMap[id]?.label || id);
+    DOM.providerLabel.textContent = label;
+  }
+  if (DOM.providerMenu) buildProviderMenu();
+  return activeProviderId;
+}
+
+export function getActiveProvider() { return activeProviderId; }
+
 const DOM = {
   input: null,
   btn: null,
@@ -34,6 +62,8 @@ export function initSearch({
   DOM.providerMenu = providerMenu;
   DOM.viewportWrap = viewportWrap;
 
+  // label inicial em PT-BR pra coincidir com a opcao default 'all'
+  if (DOM.providerLabel) DOM.providerLabel.textContent = 'todos os providers';
   buildProviderMenu();
 
   searchBtn.addEventListener('click', () => runSearch());
@@ -75,8 +105,8 @@ function buildProviderMenu() {
   const menu = DOM.providerMenu;
   menu.innerHTML = '';
   const opts = [
-    { id: 'all', label: 'all providers', badge: `${providers.length}` },
-    ...providers.map(p => ({ id: p.id, label: p.label, badge: p.needsKey ? 'key' : 'free' })),
+    { id: 'all', label: 'todos os providers', badge: `${providers.length}` },
+    ...providers.map(p => ({ id: p.id, label: p.label, badge: p.needsKey ? 'chave' : 'livre' })),
   ];
   for (const o of opts) {
     const div = document.createElement('div');
@@ -106,23 +136,24 @@ async function runSearch() {
   currentSearchAbort = new AbortController();
   const signal = currentSearchAbort.signal;
 
-  DOM.results.innerHTML = `<div class="status">searching…</div>`;
+  DOM.results.innerHTML = `<div class="status">buscando…</div>`;
   const providerIds = activeProviderId === 'all' ? null : [activeProviderId];
   let items;
   try {
     items = await searchAll(q, { signal, providerIds });
   } catch (e) {
-    if (signal.aborted) return;
-    DOM.results.innerHTML = `<div class="status error">search failed: ${escapeHtml(e.message)}</div>`;
-    return;
+    if (signal.aborted) return [];
+    DOM.results.innerHTML = `<div class="status error">busca falhou: ${escapeHtml(e.message)}</div>`;
+    return [];
   }
-  if (signal.aborted) return;
+  if (signal.aborted) return [];
   lastResults = items;
   if (items.length === 0) {
-    DOM.results.innerHTML = `<div class="status">no results for "${escapeHtml(q || '(empty)')}"</div>`;
-    return;
+    DOM.results.innerHTML = `<div class="status">nenhum resultado para "${escapeHtml(q || '(vazio)')}"</div>`;
+    return items;
   }
   renderResults(items);
+  return items;
 }
 
 function renderResults(items) {
@@ -131,7 +162,7 @@ function renderResults(items) {
     const card = document.createElement('div');
     card.className = 'result-card';
     card.draggable = true;
-    card.title = `${item.name} — drag to viewport to add`;
+    card.title = `${item.name} — arraste para a cena para adicionar`;
     card.addEventListener('dragstart', ev => {
       ev.dataTransfer.setData('application/x-clag-asset', item.id);
       ev.dataTransfer.effectAllowed = 'copy';
@@ -174,18 +205,18 @@ function renderResults(items) {
 
 async function downloadAndPlace(item, position) {
   const provider = providerMap[item.source];
-  if (!provider) { toast(`unknown provider: ${item.source}`, { kind: 'error' }); return; }
-  const t = toast(`downloading "${item.name}"…`, { timeout: 0 });
+  if (!provider) { toast(`provider desconhecido: ${item.source}`, { kind: 'error' }); return; }
+  const t = toast(`baixando "${item.name}"…`, { timeout: 0 });
   try {
     const { url, ext } = await provider.download(item, {
       onProgress: (rec, total) => {
         if (total > 0) {
           t.setProgress(rec / total);
-          t.update(`downloading "${item.name}"… ${formatBytes(rec)}/${formatBytes(total)}`);
+          t.update(`baixando "${item.name}"… ${formatBytes(rec)}/${formatBytes(total)}`);
         }
       },
     });
-    t.update(`loading "${item.name}"…`);
+    t.update(`carregando "${item.name}"…`);
     t.setProgress(1);
     const obj = await loadModelFromUrl(url, ext || item.format);
     obj.userData.kind = 'asset';
@@ -202,13 +233,13 @@ async function downloadAndPlace(item, position) {
     obj.name = item.name;
     addToScene(obj, { name: item.name, idPrefix: 'asset', position });
     t.setKind('success');
-    t.update(`added "${item.name}"`);
+    t.update(`"${item.name}" adicionado`);
     setTimeout(() => t.dismiss(), 1500);
     URL.revokeObjectURL(url);
   } catch (e) {
     console.error(e);
     t.setKind('error');
-    t.update(`failed: ${e.message}`);
+    t.update(`falhou: ${e.message}`);
     setTimeout(() => t.dismiss(), 6000);
   }
 }

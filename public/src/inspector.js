@@ -22,7 +22,7 @@ function render() {
   if (!root) return;
   const obj = getSelected();
   if (!obj) {
-    root.innerHTML = `<div class="empty">no object selected</div>`;
+    root.innerHTML = `<div class="empty">nenhum objeto selecionado</div>`;
     return;
   }
   root.innerHTML = '';

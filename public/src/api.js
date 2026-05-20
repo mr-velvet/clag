@@ -23,6 +23,8 @@ import {
 } from './scene.js';
 import { providers, providerMap, searchAll } from './providers/index.js';
 import { getTree, getLeaf, allLeaves } from './catalog.js';
+// runSearchUI / setActiveProvider vem via deps pra evitar acoplamento direto,
+// mas como search.js ja eh importado em main, pegamos via deps em initApi.
 
 // estes vem de main.js via initApi(deps) — modulos pesados ficam la pra evitar
 // dependencia circular de import
@@ -94,17 +96,18 @@ const actions = {
     return await d.load();
   },
 
-  // busca
+  // busca — delega pra UI da aba Buscar pra que a grade visual atualize
+  // (fecha bug 1 do QA: API espelha UI).
   async runSearch(query, providerId) {
     const d = ensureDeps();
-    if (providerId && providerId !== 'all') {
-      const items = await searchAll(query, { providerIds: [providerId] });
-      d.setLastResults(items);
-      return items;
-    }
-    const items = await searchAll(query);
-    d.setLastResults(items);
-    return items;
+    return await d.runSearchUI(query, providerId);
+  },
+
+  // troca de provider ativo — sincroniza estado interno + label/menu da UI
+  // (fecha bug 2 do QA: botao #provider-btn ganha equivalente programatico).
+  setProvider(id) {
+    const d = ensureDeps();
+    return d.setActiveProvider(id);
   },
 
   // drop programatico de asset (usa lastResults guardado pelo search.js + api)
@@ -186,6 +189,10 @@ const state = {
     return d.getLastResults().slice();
   },
   gizmoMode() { return getGizmoMode(); },
+  activeProvider() {
+    const d = ensureDeps();
+    return d.getActiveProvider();
+  },
   isPanelOpen(side) {
     const el = document.getElementById('app');
     if (side === 'left') return !el.classList.contains('no-left');
@@ -221,7 +228,9 @@ function d_syncModeButtons() {
 // -------------------- init --------------------
 
 export function initApi(deps) {
-  // deps esperado: { addPrimitiveByKind, downloadAndPlace, save, load, getLastResults, setLastResults }
+  // deps esperado: { addPrimitiveByKind, downloadAndPlace, save, load,
+  //   getLastResults, setLastResults, runSearchUI, setActiveProvider,
+  //   getActiveProvider, catalog* }
   _deps = deps;
 
   // expoe global
