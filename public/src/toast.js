@@ -2,18 +2,32 @@ let stack;
 
 export function initToast(el) { stack = el; }
 
-export function toast(message, { kind = 'info', timeout = 2600 } = {}) {
+// opts.action: { label, onClick } — botao opcional no lado direito do toast.
+// Click executa onClick e dismiss. Estilizado custom (sem nativo).
+export function toast(message, { kind = 'info', timeout = 2600, action = null } = {}) {
   const t = document.createElement('div');
   t.className = `toast ${kind}`;
   const line = document.createElement('div');
   line.className = 'toast-line';
-  line.textContent = message;
+  const text = document.createElement('span');
+  text.className = 'toast-text';
+  text.textContent = message;
+  line.appendChild(text);
+  if (action && typeof action.onClick === 'function') {
+    const btn = document.createElement('button');
+    btn.className = 'toast-action';
+    btn.textContent = action.label || 'OK';
+    btn.addEventListener('click', () => {
+      try { action.onClick(); } finally { fade(t); }
+    });
+    line.appendChild(btn);
+  }
   t.appendChild(line);
   stack.appendChild(t);
   if (timeout > 0) setTimeout(() => fade(t), timeout);
   return {
     el: t,
-    update(msg) { line.textContent = msg; },
+    update(msg) { text.textContent = msg; },
     setProgress(frac) {
       let bar = t.querySelector('.progress-bar');
       if (!bar) {

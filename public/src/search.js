@@ -12,6 +12,12 @@ let activeProviderId = 'all';
 let lastResults = [];
 let currentSearchAbort = null;
 
+// callback injetado por main.js — abre painel custom de configuracao de
+// chave de provider. Mantemos como hook pra evitar dependencia circular
+// (main.js ja importa search.js).
+let _openProviderKeyPanel = null;
+export function setKeyPanelOpener(fn) { _openProviderKeyPanel = fn; }
+
 // expoe pra api.js / agentes consumirem os mesmos results que a UI ve
 export function getLastResults() { return lastResults; }
 export function setLastResults(items) { lastResults = items; }
@@ -251,9 +257,27 @@ async function downloadAndPlace(item, position) {
     URL.revokeObjectURL(url);
   } catch (e) {
     console.error(e);
-    t.setKind('error');
-    t.update(`falhou: ${e.message}`);
-    setTimeout(() => t.dismiss(), 6000);
+    t.dismiss();
+    // se o erro indica chave de API ausente/rejeitada, mostra toast curto
+    // com botao "Configurar" — leva direto pro painel custom do provider.
+    // Detecta por padrao de mensagem (cobre Sketchfab atual + providers
+    // futuros que sigam mesma convencao). Tambem dispara se provider declara
+    // needsKey=true E ainda nao tem chave guardada.
+    const msg = String(e.message || '');
+    const looksLikeKeyMissing = /not configured|api token|needs key|token rejected|401/i.test(msg)
+      || (provider.needsKey && !localStorage.getItem(`clag:keys:${provider.id}`));
+    if (looksLikeKeyMissing && _openProviderKeyPanel) {
+      toast(`${provider.label} pediu token — configure pra continuar`, {
+        kind: 'error',
+        timeout: 8000,
+        action: {
+          label: 'Configurar',
+          onClick: () => _openProviderKeyPanel(provider.id),
+        },
+      });
+    } else {
+      toast(`falhou: ${msg}`, { kind: 'error', timeout: 6000 });
+    }
   }
 }
 

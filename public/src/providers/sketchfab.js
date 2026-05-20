@@ -64,7 +64,9 @@ export async function search(query, { signal } = {}) {
 export async function download(item, { onProgress, signal } = {}) {
   const token = getKey();
   if (!token) {
-    throw new Error('sketchfab: API token not configured. Click the key icon in the provider menu and paste your token from sketchfab.com/settings/password.');
+    // mensagem curta em PT-BR — search.js detecta esse padrao e abre painel
+    // custom de configuracao via toast com botao "Configurar".
+    throw new Error('sketchfab: token de API nao configurado');
   }
   const r = await fetch(`https://api.sketchfab.com/v3/models/${item.raw.uid}/download`, {
     headers: { Authorization: `Bearer ${token}` },

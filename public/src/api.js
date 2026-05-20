@@ -228,6 +228,13 @@ const actions = {
     },
   },
 
+  // abre painel custom de configuracao de chave de provider.
+  // Mesma funcao que o botao "Configurar" do toast invoca.
+  openProviderKeyPanel(providerId) {
+    const d = ensureDeps();
+    return d.openProviderKeyPanel(providerId);
+  },
+
   // catalogo (Fase 1)
   catalog: {
     tree() { return getTree(); },

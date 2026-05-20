@@ -9,6 +9,7 @@ import { initInspector } from './inspector.js';
 import {
   initSearch, getLastResults, setLastResults, downloadAndPlace,
   runSearchUI, setActiveProvider, getActiveProvider, applyAnchor,
+  setKeyPanelOpener,
 } from './search.js';
 import * as snap from './snap.js';
 import { initCatalogUI, searchCategory, showTab, expandCategory, collapseCategory, getExpandedCategories } from './catalog-ui.js';
@@ -298,6 +299,85 @@ function closeRoomModal() {
   if (_roomModal) _roomModal.overlay.classList.add('hidden');
 }
 
+// painel custom de configuracao de chave de provider — substitui prompt().
+// Acionado pelo botao "Configurar" do toast quando download exige token.
+// Persiste em localStorage[`clag:keys:${providerId}`] (convencao do ARCHITECTURE.md).
+const PROVIDER_KEY_HINTS = {
+  sketchfab: { label: 'obter token em sketchfab.com/settings/password', url: 'https://sketchfab.com/settings/password' },
+};
+let _keyPanel = null;
+function buildKeyPanel() {
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-overlay hidden';
+  overlay.innerHTML = `
+    <div class="modal-card" role="dialog" aria-labelledby="key-modal-title">
+      <div class="modal-title" id="key-modal-title">configurar acesso</div>
+      <a class="modal-link" id="key-modal-hint" target="_blank" rel="noopener"></a>
+      <div class="modal-row full">
+        <label for="key-modal-input">token de API</label>
+        <input id="key-modal-input" type="password" autocomplete="off" spellcheck="false" />
+      </div>
+      <div class="modal-actions">
+        <button class="btn" data-clag-action="key-modal-cancel" id="key-modal-cancel">cancelar</button>
+        <button class="btn primary" data-clag-action="key-modal-save" id="key-modal-save">salvar</button>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(overlay);
+  const titleEl = overlay.querySelector('#key-modal-title');
+  const hintEl = overlay.querySelector('#key-modal-hint');
+  const input = overlay.querySelector('#key-modal-input');
+  const cancelBtn = overlay.querySelector('#key-modal-cancel');
+  const saveBtn = overlay.querySelector('#key-modal-save');
+  let currentProviderId = null;
+
+  function commit() {
+    if (!currentProviderId) return;
+    const v = input.value.trim();
+    if (!v) { toast('token vazio', { kind: 'warn' }); return; }
+    localStorage.setItem(`clag:keys:${currentProviderId}`, v);
+    const prov = providerMap[currentProviderId];
+    toast(`token de ${prov?.label || currentProviderId} salvo`, { kind: 'success' });
+    close();
+  }
+  function close() { overlay.classList.add('hidden'); }
+  cancelBtn.addEventListener('click', close);
+  saveBtn.addEventListener('click', commit);
+  overlay.addEventListener('keydown', ev => {
+    if (ev.key === 'Enter') { ev.preventDefault(); commit(); }
+    if (ev.key === 'Escape') { ev.preventDefault(); close(); }
+  });
+  overlay.addEventListener('click', ev => { if (ev.target === overlay) close(); });
+  return {
+    overlay, titleEl, hintEl, input,
+    open(providerId) {
+      currentProviderId = providerId;
+      const prov = providerMap[providerId];
+      titleEl.textContent = `configurar acesso ao ${prov?.label || providerId}`;
+      const hint = PROVIDER_KEY_HINTS[providerId];
+      if (hint) {
+        hintEl.textContent = hint.label;
+        hintEl.href = hint.url;
+        hintEl.style.display = '';
+      } else {
+        hintEl.style.display = 'none';
+      }
+      input.value = localStorage.getItem(`clag:keys:${providerId}`) || '';
+      overlay.classList.remove('hidden');
+      setTimeout(() => input.focus(), 0);
+    },
+  };
+}
+function openProviderKeyPanel(providerId) {
+  if (!providerMap[providerId]) {
+    toast(`provider desconhecido: ${providerId}`, { kind: 'warn' });
+    return;
+  }
+  if (!_keyPanel) _keyPanel = buildKeyPanel();
+  _keyPanel.open(providerId);
+}
+setKeyPanelOpener(openProviderKeyPanel);
+
 // HUD stats
 const hudStats = $('hud-stats');
 const hudSelection = $('hud-selection');
@@ -360,6 +440,8 @@ initApi({
   getRoomDimensions,
   hasRoom,
   openRoomModal,
+  // config: painel custom de chave de provider
+  openProviderKeyPanel,
 });
 
 toast('clag carregado — arraste para orbitar · clique em objetos para selecionar', { timeout: 4500 });

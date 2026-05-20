@@ -820,6 +820,20 @@ body {
 .toast.error { border-left-color: var(--danger); }
 .toast.warn { border-left-color: var(--warn); }
 .toast .toast-line { display: flex; align-items: center; gap: 8px; }
+.toast .toast-text { flex: 1 1 auto; min-width: 0; }
+.toast .toast-action {
+  flex: 0 0 auto;
+  background: var(--bg-3);
+  border: 1px solid var(--border);
+  color: var(--text-0);
+  padding: 3px 10px;
+  font: 11px ui-monospace, Menlo, monospace;
+  border-radius: 3px;
+  cursor: pointer;
+  letter-spacing: 0.3px;
+}
+.toast .toast-action:hover { background: var(--accent); border-color: var(--accent); color: var(--bg-1); }
+.toast.error .toast-action:hover { background: var(--danger); border-color: var(--danger); color: var(--bg-1); }
 .toast .progress-bar {
   margin-top: 6px;
   height: 3px;
@@ -905,6 +919,29 @@ body {
   from { opacity: 0; }
   to { opacity: 1; }
 }
+
+/* painel de chave de provider — custom, sem prompt() */
+.modal-row input[type=password],
+.modal-row input[type=text] {
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+  color: var(--text-0);
+  padding: 5px 8px;
+  font: 12px ui-monospace, Menlo, monospace;
+  border-radius: 3px;
+  width: 100%;
+}
+.modal-row input[type=password]:focus,
+.modal-row input[type=text]:focus { outline: none; border-color: var(--accent); }
+.modal-row.full { grid-template-columns: 1fr; }
+.modal-link {
+  font-size: 11.5px;
+  color: var(--accent);
+  text-decoration: none;
+  border-bottom: 1px dashed var(--accent);
+  align-self: flex-start;
+}
+.modal-link:hover { color: var(--text-0); border-bottom-color: var(--text-0); }
 
 /* inspector: aviso textual sutil pra anchor fallback (PM #3) */
 .insp-anchor-warning {
