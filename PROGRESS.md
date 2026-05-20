@@ -1,6 +1,6 @@
 # PROGRESS — clag
 
-Última atualização: 2026-05-20 (patch pré-deploy SIMS-MODE v1 — Bug 9 ceiling pivot, Bug 10 persist anchorApplied, modal grammar, room limpa Ground)
+Última atualização: 2026-05-20 (sessão tarde-noite — SIMS-MODE v1 no ar em clag.did.lu, PROPOSALS.md criado, toast com botão "Configurar")
 
 ## como usar este arquivo
 
@@ -8,30 +8,27 @@ Próximas sessões devem ler este arquivo PRIMEIRO. Estado vivo do projeto, pró
 
 ## status
 
-**PoC funcional graduado pra repo dedicado.** Em 2026-05-19:
+**SIMS-MODE v1 no ar em https://clag.did.lu.** Fases 0-4 entregues e validadas, deploy ok, bug fixes pós-deploy aplicados. Em 2026-05-20 (tarde-noite):
 - Layout 3 painéis (hierarchy / viewport / inspector) + asset browser embaixo
 - Cena editável com TransformControls (W/E/R/F/Del/Ctrl+D/Esc)
-- 3 providers integrados: Khronos (catálogo curado), Poly Haven (API pública CC0), Sketchfab (search anônima — download exige OAuth, ainda não implementado)
-- Save/load via localStorage, drag-to-scene + double-click, toast com progress
-- Layout responsivo testado 800 / 1024 / 1200 / 1480
-- Deploy ainda em `st.did.lu/scene-ide/v2/` (clone do PoC). `clag.did.lu` ainda não foi subido — esperando estabilizar.
+- 3 providers integrados: Khronos, Poly Haven, Sketchfab (search anônima)
+- Catálogo semântico em 6 categorias (50 folhas) + busca livre coexistindo
+- Snap a grid como default + rotação discreta + freeTransform por objeto
+- Footprint + anchor (floor/wall/ceiling) — itens caem com regra "tipo Sims"
+- Modo Sala — modal custom 6×5×2.7m default, paredes/piso/teto editáveis
+- Toast com botão "Configurar" pra erros de key de provider (sessão de hoje)
+- Save/load via localStorage, drag-to-scene + double-click, layout responsivo
+- API programática `window.clag.{actions,state}` exposta pra QA
 
 Repo: https://github.com/mr-velvet/clag
 
-## o que precisa antes de subir clag.did.lu
-
-- [ ] Validar Express server.js local (`npm install && npm start` → http://localhost:5045)
-- [ ] Reservar porta 5045 no inventário do devops-workflow-2026 (se aplicável)
-- [ ] `.\scripts\did.ps1 deploy clag` da workspace devops
-- [ ] Smoke test em produção
-
 ## próximos passos por ordem (curto)
 
-Priorizado em [docs/ROADMAP.md](./docs/ROADMAP.md). Em resumo, antes de mexer em features novas:
+Priorizado em [docs/PROPOSALS.md](./docs/PROPOSALS.md) (propostas longas) + [docs/ROADMAP.md](./docs/ROADMAP.md) (lista crua):
 
-1. Subir em `clag.did.lu` (item acima)
-2. Export `.glb` da cena + `CREDITS.txt` com licenças — produto fica útil de verdade só depois disso
-3. Smithsonian como 4º provider (ver esboço no fim de [docs/PROVIDERS.md](./docs/PROVIDERS.md))
+1. **Decidir direção CONFIG** — proposta detalhada em PROPOSALS.md #1. Recomendação: Opção C (graduação) — começa contextual, gradua quando >3-5 itens órfãos. Discutir antes de implementar.
+2. **Protótipo GIZMO Opção D num branch** — surface-snap + anti-overlap (AABB sweep) + cadeado unificado. Proposta detalhada em PROPOSALS.md #2. ~2 semanas de implementação em 5 sub-fases (D.1 surface raycast → D.2 anti-overlap XZ → D.3 cadeado overlay → D.4 anti-overlap vertical → D.5 polish). Critério de merge: leigo monta cena em <2min sem instrução. Fallback pra Opção A (drag direto sem colisão) se sweep test mostrar limites técnicos.
+3. **v1.1 do ROADMAP.md em paralelo** — export `.glb` + `CREDITS.txt`, undo/redo básico (dependência implícita do gizmo D — saída natural se sweep prender o user), painel de licenças.
 
 ## próximos passos por ordem (médio)
 
@@ -62,6 +59,8 @@ Resumo — detalhe em PRINCIPLES.md:
 - **TransformControls + Inspector básico já é feature-completa pra v1.** Sem editor de animação, sem shader graph, sem renderer custom — fora do escopo.
 
 ## histórico
+
+- **2026-05-20 (sessão tarde-noite — deploy + propostas)**: SIMS-MODE v1 deployado em https://clag.did.lu (commits 889bb4a → 2d98cb6 + 26404d8 + e86547d + 9bac984). Fases 0-4 entregues e validadas. Bug fix das thumbs colapsadas pós-deploy. **Sessão de propostas**: `docs/PROPOSALS.md` criado com 2 propostas longas — **CONFIG** (keys de provider, persistência, como crescer sem virar painel de admin) e **GIZMO** (alternativa leiga ao TransformControls mantendo W/E/R como avançado). CONFIG tem opções A/B/C; recomendação Opção C (graduação contextual→central). GIZMO tem opções A/B/C/D; recomendação Opção D — surface-snap + anti-overlap AABB + cadeado unificado (absorvendo tese do user sobre evitar sobreposição entre objetos e snap a superfície em vez de grade). Cada proposta tem trade-offs explícitos, ganchos pra implementação futura, edge cases mapeados. Conclusão da sessão: implementação das propostas pendente — discutir antes. **Pequeno ajuste de UX implementado**: `toast.js` ganha opção `action: { label, onClick }` que renderiza botão estilizado no lado direito do toast. `search.js::downloadAndPlace` catch detecta erro de key (mensagem padrão ou `provider.needsKey` sem entrada em localStorage) e dispara toast com botão "Configurar" que abre painel custom (modal com link pra obter token + input password + salvar/cancelar). `main.js::openProviderKeyPanel` substitui o caminho friccional de "achar ícone de chave no menu de provider — mensagem original do erro". Mensagem de erro do Sketchfab traduzida pra PT-BR. `api.js` expõe `actions.openProviderKeyPanel(providerId)` pra QA. Estilos novos: `.toast-action`, `.toast-text`, `.modal-row.full`, `.modal-link`. Zero componente nativo introduzido.
 
 - **2026-05-20 (patch pré-deploy SIMS-MODE v1)**: `search.js::applyAnchor` ceiling agora usa `obj.position.y += (ceilingY - objBox.max.y)` (delta-topo) em vez de `ceilingY - boxSize.y/2` — fecha Bug 9 do QA (assets com pivot fora do centro do bbox, como Chandelier 01, ficavam ~40cm abaixo do teto). Mesma fórmula aplicada ao fallback (sem sala) com `ROOM_HEIGHT_DEFAULT`. `persist.js` serializa `userData.anchorApplied` e restaura em `applySimsMeta` — fecha Bug 10 (state.objectAnchorApplied virava null pós save+load). `main.js` modal Nova Sala: subtitle reescrito pra português correto + nota sutil sobre reset de cores (PM #2). `room.js::createRoom` remove `Ground` starter (filtro conservador por `name === 'Ground'`) antes de criar piso — evita z-fight com `room:floor` e fecha trade-off "cena starter coexiste" do PM #3.
 
