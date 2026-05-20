@@ -259,17 +259,22 @@ async function downloadAndPlace(item, position) {
 
 // aplica regra de ancoragem ao objeto recem-adicionado (Fase 3 Sims-mode).
 //
-// - floor: ja eh o comportamento padrao (asset entra com Y=0 do loader). nop.
+// - floor: planta o objeto no chao (base do bounding box em Y=0).
 // - ceiling: se ha `room:ceiling`, alinha Y a altura dele; sem sala, usa
 //   ROOM_HEIGHT_DEFAULT como fallback. marca anchorApplied.
 // - wall: tenta raycast da posicao de drop em direcao a cada parede
-//   `room:wall`; se acerta, cola na parede (posiciona no hit, alinha
-//   rotacao Y com a normal da parede); sem sala, fallback (mantem floor).
+//   `room:wall`; se acerta, cola na parede; sem sala, planta no chao
+//   (fallback) — marca anchorApplied='wall-fallback'.
 //
-// Helper publico — chamavel por inspector quando muda anchor depois.
+// Helper publico — chamavel por inspector quando muda anchor depois. Fix
+// Bug 7: branches 'floor' e 'wall-fallback' agora resetam Y pro chao em
+// vez de deixar objeto flutuando (ex: depois de mudar de ceiling pra floor).
 export function applyAnchor(obj, dropPos) {
   const anchor = obj?.userData?.anchor || 'floor';
   if (anchor === 'floor') {
+    // Fix Bug 7: planta base do objeto no chao (Y=0). Antes deixava Y como
+    // estava — depois de ceiling -> floor o objeto ficava flutuando.
+    plantOnFloor(obj);
     obj.userData.anchorApplied = 'floor';
     return;
   }
@@ -287,14 +292,17 @@ export function applyAnchor(obj, dropPos) {
       const objHeight = box.getSize(new THREE.Vector3()).y;
       obj.position.y = ROOM_HEIGHT_DEFAULT - objHeight;
       obj.userData.anchorApplied = 'ceiling-fallback';
+      toast('sem sala — luz pendurada no teto virtual (2.7m)', { kind: 'warn' });
     }
     return;
   }
   if (anchor === 'wall') {
     const walls = findUserChildrenByKind('room:wall');
     if (walls.length === 0 || !dropPos) {
-      // sem sala -> comportamento atual (chao). marca pra UI saber.
+      // Fix Bug 7: sem sala, planta objeto no chao (antes deixava Y solto).
+      plantOnFloor(obj);
       obj.userData.anchorApplied = 'wall-fallback';
+      toast('sem parede — objeto posicionado no chão', { kind: 'warn' });
       return;
     }
     // raycast horizontal a partir do drop em direcao a cada parede.
@@ -327,10 +335,22 @@ export function applyAnchor(obj, dropPos) {
       }
       obj.userData.anchorApplied = 'wall';
     } else {
+      // Fix Bug 7: raycast nao acertou nenhuma parede — planta no chao.
+      plantOnFloor(obj);
       obj.userData.anchorApplied = 'wall-fallback';
+      toast('sem parede — objeto posicionado no chão', { kind: 'warn' });
     }
     return;
   }
+}
+
+// planta a base do bounding box do objeto exatamente em Y=0 (chao).
+// Mesma matematica que loader::finalize aplica no carregamento — reusada
+// aqui pra resetar Y ao mudar anchor pra floor (ou fallback de wall).
+function plantOnFloor(obj) {
+  const box = new THREE.Box3().setFromObject(obj);
+  if (box.isEmpty()) return;
+  obj.position.y -= box.min.y;
 }
 
 function findUserChildByKind(kind) {

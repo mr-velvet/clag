@@ -192,12 +192,22 @@ async function downloadAndPlaceFromMeta(meta, transform) {
   const obj = await loadModelFromUrl(url, ext || meta.format);
   obj.userData.kind = 'asset';
   obj.userData.assetMeta = meta;
+  // Fix Bug 8: propaga anchor/footprint do meta pro topo do userData pra que
+  // applySimsMeta + snap/inspector consigam ler sem cavar dentro de assetMeta.
+  if (meta.anchor) obj.userData.anchor = meta.anchor;
+  if (Array.isArray(meta.footprint)) {
+    obj.userData.footprint = [meta.footprint[0], meta.footprint[1]];
+  }
   obj.name = transform.name || meta.name;
   addToScene(obj, { name: transform.name || meta.name, idPrefix: 'asset' });
   if (transform.position) obj.position.copy(transform.position);
   if (transform.rotation) obj.rotation.set(...transform.rotation);
   if (transform.scale) obj.scale.fromArray(transform.scale);
   URL.revokeObjectURL(url);
+  // Fix Bug 8 (bloqueador Fase 3): retornar obj pra persist.js conseguir
+  // chamar applySimsMeta(obj, savedObj) e restaurar anchor/footprint/freeTransform
+  // do save. Antes retornava undefined -> applySimsMeta nunca rodava.
+  return obj;
 }
 
 // HUD stats

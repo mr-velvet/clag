@@ -166,16 +166,18 @@ const actions = {
   },
 
   // Fase 3: footprint editavel via API. valida w,d inteiros >= 1.
+  // Fix Bug 6: usa Number.isInteger no valor cru pra rejeitar floats
+  // (antes `parseInt(1.5)` truncava silenciosamente pra 1).
   setObjectFootprint(sceneId, footprint) {
     const obj = getUserObjects().find(o => o.userData?.sceneId === sceneId);
     if (!obj) throw new Error(`objeto nao encontrado: ${sceneId}`);
     if (!Array.isArray(footprint) || footprint.length !== 2) {
       throw new Error(`footprint invalido (esperado [w, d]): ${JSON.stringify(footprint)}`);
     }
-    const w = parseInt(footprint[0], 10);
-    const d = parseInt(footprint[1], 10);
+    const w = footprint[0];
+    const d = footprint[1];
     if (!Number.isInteger(w) || !Number.isInteger(d) || w < 1 || d < 1) {
-      throw new Error(`footprint invalido (precisa inteiros >= 1): ${JSON.stringify(footprint)}`);
+      throw new Error(`footprint deve ser dois inteiros >= 1: ${JSON.stringify(footprint)}`);
     }
     obj.userData.footprint = [w, d];
     if (obj.userData.assetMeta) obj.userData.assetMeta.footprint = [w, d];

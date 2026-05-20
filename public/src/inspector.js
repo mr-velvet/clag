@@ -36,7 +36,7 @@ function render() {
   root.innerHTML = '';
 
   // -- identity section
-  const idSec = section('identity');
+  const idSec = section('identidade');
   const nameRow = row('name');
   const nameIn = document.createElement('input');
   nameIn.type = 'text';
@@ -128,7 +128,7 @@ function render() {
   // -- light section
   const light = firstLight(obj);
   if (light) {
-    const lSec = section('light');
+    const lSec = section('luz');
     const r = row('color');
     const wrap = document.createElement('div');
     wrap.className = 'insp-color-row';
@@ -151,7 +151,7 @@ function render() {
   // -- info section
   const stats = gatherStats(obj);
   if (stats) {
-    const iSec = section('info');
+    const iSec = section('informações');
     iSec.appendChild(plainRow('verts', String(stats.verts)));
     iSec.appendChild(plainRow('tris', String(stats.tris)));
     iSec.appendChild(plainRow('meshes', String(stats.meshes)));
@@ -240,7 +240,9 @@ function positioningSection(obj) {
   // footprint: w × d em tiles inteiros (default [1, 1])
   // Label "L × P" = Largura × Profundidade na grade. Inteiros >= 1.
   const fp = Array.isArray(obj.userData.footprint) ? obj.userData.footprint : [1, 1];
-  const fpRow = row('tamanho');
+  // PM ressalva #2: label "tamanho na grade" deixa claro que sao tiles
+  // (nao metros, nao escala). Cells L/P ficam por causa da largura de 56px.
+  const fpRow = row('tamanho na grade');
   const wrap = document.createElement('div');
   wrap.className = 'vec3-row';
   wrap.style.gridTemplateColumns = 'repeat(2, 1fr)';
