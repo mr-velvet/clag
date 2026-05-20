@@ -3,3 +3,8 @@ node_modules/
 *.log
 .env
 .env.local
+
+# artefatos efêmeros dos agentes (PM/QA Playwright)
+.playwright-mcp/
+screenshots/qa/
+screenshots/qa-pass*/
