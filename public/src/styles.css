@@ -989,3 +989,40 @@ body {
   :root { --left-w: 0px; --right-w: 0px; }
   #left-panel, #right-panel { display: none; }
 }
+
+/* D.3 — cadeado HTML overlay (screen-space, posicionado via JS) */
+.lock-overlay {
+  position: fixed;                   /* fixed pra sair do fluxo do DOM */
+  width: 32px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 16px;
+  background: rgba(22, 25, 34, 0.82);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  cursor: pointer;
+  pointer-events: auto;
+  z-index: 300;
+  transition: background 0.12s, border-color 0.12s, transform 0.1s;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.4);
+  user-select: none;
+}
+.lock-overlay:hover {
+  background: var(--bg-3);
+  border-color: var(--accent);
+  transform: scale(1.08);
+}
+.lock-overlay.hidden { display: none; }
+/* cadeado aberto tem borda azulada pra indicar modo livre */
+.lock-overlay.unlocked {
+  border-color: var(--accent);
+  background: rgba(69, 132, 234, 0.18);
+}
+
+/* cursor grab no viewport quando contextual-gizmo detecta objeto sob cursor */
+#viewport-wrap.grabbing,
+#viewport-wrap.grabbing canvas {
+  cursor: grabbing !important;
+}

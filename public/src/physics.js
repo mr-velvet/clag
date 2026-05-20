@@ -1,0 +1,214 @@
+// physics.js — AABB store + sweep test XZ + surface raycast (D.1 + D.2)
+//
+// Não é uma engine de física. É um store de bounding boxes axis-aligned com
+// dois algoritmos simples: sweep no plano XZ (anti-overlap) e raycast pra
+// baixo (snap-to-surface). Sem constraints, sem rigidbodies, sem integração.
+//
+// Objetos registrados: todos em userRoot que não são room:* nem isHelper.
+// AABB é recalculado via update(obj) quando transform muda.
+//
+// Limitações conhecidas (TODO D.5):
+//   - AABB não rotaciona com o objeto (axis-aligned = sempre alinhado ao mundo)
+//   - Tunneling em drag muito rápido não é detectado
+//   - Objeto completamente cercado não tem saída automática (cadeado libera)
+
+import * as THREE from 'three';
+
+// sceneId -> { obj, box: THREE.Box3 }
+const _store = new Map();
+
+// tolerância pra evitar auto-colisão por imprecisão numérica
+const TOLERANCE = 0.01;
+
+// -------------------- registro --------------------
+
+export function register(obj) {
+  if (!obj?.userData?.sceneId) return;
+  const box = new THREE.Box3().setFromObject(obj);
+  _store.set(obj.userData.sceneId, { obj, box });
+}
+
+export function unregister(obj) {
+  if (!obj?.userData?.sceneId) return;
+  _store.delete(obj.userData.sceneId);
+}
+
+// recalcula AABB de um objeto já registrado
+export function update(obj) {
+  if (!obj?.userData?.sceneId) return;
+  const entry = _store.get(obj.userData.sceneId);
+  if (!entry) { register(obj); return; }
+  entry.box.setFromObject(obj);
+}
+
+export function getAABB(obj) {
+  if (!obj?.userData?.sceneId) return null;
+  const entry = _store.get(obj.userData.sceneId);
+  return entry ? entry.box.clone() : null;
+}
+
+// registra todos os objetos de userRoot (usado no boot pra idempotência)
+export function registerAll(userRoot) {
+  for (const child of userRoot.children) {
+    if (_shouldSkip(child)) continue;
+    register(child);
+  }
+}
+
+// -------------------- surface raycast (D.1) --------------------
+
+// Raycasta pra baixo a partir da posição candidata (XZ + altura AABB do obj).
+// Retorna { y, hitObj } com Y do ponto de topo da superfície, ou null se sem hit.
+// Exclui o próprio objeto e room:floor (o chão lógico é Y=0).
+//
+// Lógica: posiciona rayo de cima pra baixo. Hit em outro objeto -> Y = hit.point.y.
+// Se não há hit -> Y = 0 (chão lógico).
+export function surfaceUnder(obj, targetXZ, userRoot) {
+  const myId = obj?.userData?.sceneId;
+
+  // calcula meio AABB do objeto pra saber a altura dele
+  const myBox = _store.get(myId)?.box;
+  const objHeight = myBox ? (myBox.max.y - myBox.min.y) : 1;
+
+  // origem do raio: ponto XZ alvo, altura bem acima
+  const origin = new THREE.Vector3(targetXZ.x, 200, targetXZ.z);
+  const dir    = new THREE.Vector3(0, -1, 0);
+  const ray    = new THREE.Raycaster(origin, dir, 0.001, 500);
+
+  // candidatos: todos em userRoot excluindo o próprio e room:floor
+  const candidates = [];
+  for (const child of userRoot.children) {
+    if (child === obj) continue;
+    if (_isFloor(child)) continue;        // não queremos Y do chão (é 0 por definição)
+    if (_isRoomPart(child)) continue;     // paredes/teto não são superfície de cola por baixo
+    if (child.userData?.isHelper) continue;
+    candidates.push(child);
+  }
+
+  const hits = ray.intersectObjects(candidates, true);
+  if (hits.length === 0) {
+    // sem hit -> Y = 0 (chão lógico), objeto planta no chão
+    return { y: 0, hitObj: null };
+  }
+
+  const h = hits[0];
+  // topo do objeto draggado vai parar em hit.point.y
+  return { y: h.point.y, hitObj: h.object };
+}
+
+// -------------------- sweep XZ (D.2) --------------------
+
+// Testa posição candidata de `obj` contra todos os outros AABBs.
+// Retorna a posição final no plano XZ (sem mudar Y) — pode ser a posição
+// clamped caso haja colisão (slide pela face de colisão).
+//
+// Algoritmo simples de slide:
+//   1. Calcula AABB candidato (translada AABB atual pra targetPos)
+//   2. Para cada outro objeto, testa intersecção
+//   3. Se intersecta: calcula penetração em X e Z separadamente
+//   4. Desloca no eixo com MENOR penetração (slide pelo eixo "mais livre")
+//   5. Repete com posição ajustada (1 iteração — suficiente pra N<100)
+export function sweepXZ(obj, targetPos, userRoot) {
+  const myId = obj?.userData?.sceneId;
+  if (!myId) return targetPos.clone();
+
+  const myEntry = _store.get(myId);
+  if (!myEntry) return targetPos.clone();
+
+  // AABB candidato: desloca do centro atual -> centro target no plano XZ
+  const currentCenter = new THREE.Vector3();
+  myEntry.box.getCenter(currentCenter);
+
+  const delta = new THREE.Vector3(
+    targetPos.x - currentCenter.x,
+    0, // não mexe Y aqui — Y é controlado pelo surfaceUnder
+    targetPos.z - currentCenter.z,
+  );
+
+  // clona o box e desloca XZ
+  const candidateBox = myEntry.box.clone();
+  candidateBox.min.x += delta.x;
+  candidateBox.max.x += delta.x;
+  candidateBox.min.z += delta.z;
+  candidateBox.max.z += delta.z;
+
+  // resultado final começa em targetPos e vai sendo corrigido
+  let finalX = targetPos.x;
+  let finalZ = targetPos.z;
+  let blocked = false;
+
+  for (const [id, entry] of _store) {
+    if (id === myId) continue;
+    if (_isRoomPart(entry.obj)) continue; // sala nunca bloqueia XZ
+    if (entry.obj.userData?.isHelper) continue;
+
+    const other = entry.box;
+
+    // Ignora objetos praticamente 2D (planos/chão — espessura Y < 0.05u)
+    // Esses não devem bloquear sweep horizontal. Ex: ground plane, room:floor.
+    const otherHeight = other.max.y - other.min.y;
+    if (otherHeight < 0.05) continue;
+
+    // expand other por tolerância pra evitar self-stick
+    const otherExp = other.clone();
+    otherExp.min.x -= TOLERANCE;
+    otherExp.min.z -= TOLERANCE;
+    otherExp.max.x += TOLERANCE;
+    otherExp.max.z += TOLERANCE;
+
+    // intersecção apenas em XZ (ignora Y) — sweep é só horizontal
+    const xOverlap = candidateBox.min.x < otherExp.max.x && candidateBox.max.x > otherExp.min.x;
+    const zOverlap = candidateBox.min.z < otherExp.max.z && candidateBox.max.z > otherExp.min.z;
+    if (!xOverlap || !zOverlap) continue;
+
+    // há colisão — calcula penetração em X e Z
+    const penX = Math.min(
+      candidateBox.max.x - otherExp.min.x,
+      otherExp.max.x - candidateBox.min.x,
+    );
+    const penZ = Math.min(
+      candidateBox.max.z - otherExp.min.z,
+      otherExp.max.z - candidateBox.min.z,
+    );
+
+    // slide pelo eixo com MENOR penetração (mais fácil de escapar)
+    if (penX <= penZ) {
+      // slide em X: empurra pra fora no eixo X
+      const pushX = (candidateBox.min.x + candidateBox.max.x) / 2 < (otherExp.min.x + otherExp.max.x) / 2
+        ? -(penX + TOLERANCE)
+        : (penX + TOLERANCE);
+      finalX += pushX;
+      candidateBox.min.x += pushX;
+      candidateBox.max.x += pushX;
+    } else {
+      // slide em Z
+      const pushZ = (candidateBox.min.z + candidateBox.max.z) / 2 < (otherExp.min.z + otherExp.max.z) / 2
+        ? -(penZ + TOLERANCE)
+        : (penZ + TOLERANCE);
+      finalZ += pushZ;
+      candidateBox.min.z += pushZ;
+      candidateBox.max.z += pushZ;
+    }
+    blocked = true;
+  }
+
+  return new THREE.Vector3(finalX, targetPos.y, finalZ);
+}
+
+// -------------------- helpers --------------------
+
+function _shouldSkip(obj) {
+  if (obj.userData?.isHelper) return true;
+  if (_isRoomPart(obj)) return false; // registra room:wall/floor/ceiling pro sweep funcionar
+  return false;
+}
+
+function _isRoomPart(obj) {
+  const kind = obj?.userData?.kind || '';
+  return kind.startsWith('room:');
+}
+
+function _isFloor(obj) {
+  const kind = obj?.userData?.kind || '';
+  return kind === 'room:floor';
+}

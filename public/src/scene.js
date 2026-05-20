@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { TransformControls } from 'three/addons/controls/TransformControls.js';
 import * as snap from './snap.js';
+import * as physics from './physics.js';
 
 // world singletons (exported for other modules)
 export const scene = new THREE.Scene();
@@ -140,6 +141,8 @@ export function bootViewport(container) {
   gizmo.addEventListener('objectChange', () => {
     // snap continuo enquanto user arrasta — efeito "pula pro tile" e desejado.
     if (selected) snap.applySnapToObject(selected);
+    // mantém AABB atualizado enquanto TransformControls move/escala o objeto
+    if (selected) physics.update(selected);
     emit('sceneChanged');
   });
 
@@ -240,6 +243,11 @@ export function addToScene(object, opts = {}) {
   // snap inicial — XZ + rotacao discreta. Respeita freeTransform por-objeto.
   snap.applySnapToObject(object);
   userRoot.add(object);
+  // registra AABB no store de física (D.1/D.2). Room parts também são
+  // registradas para que o sweep detecte paredes — mas surfaceUnder as exclui.
+  if (!object.userData?.isHelper) {
+    physics.register(object);
+  }
   emit('sceneChanged');
   setSelected(object);
   return object;
@@ -247,6 +255,7 @@ export function addToScene(object, opts = {}) {
 
 export function removeFromScene(obj) {
   if (obj.parent === userRoot) {
+    physics.unregister(obj);
     userRoot.remove(obj);
     if (selected === obj) setSelected(null);
     disposeObject(obj);
@@ -281,6 +290,11 @@ export function frameSelected() {
   const dir = camera.position.clone().sub(orbit.target).normalize();
   camera.position.copy(c).add(dir.multiplyScalar(r));
   orbit.update();
+}
+
+// helper interno — não exportado
+function _isRoomKind(obj) {
+  return (obj?.userData?.kind || '').startsWith('room:');
 }
 
 function disposeObject(o) {

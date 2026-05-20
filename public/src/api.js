@@ -25,6 +25,12 @@ import {
 import { providers, providerMap, searchAll } from './providers/index.js';
 import { getTree, getLeaf, allLeaves } from './catalog.js';
 import * as snap from './snap.js';
+import * as physics from './physics.js';
+import {
+  toggleLock as cgToggleLock,
+  dragObjectTo as cgDragObjectTo,
+  isContextualMode, setContextualMode,
+} from './contextual-gizmo.js';
 // runSearchUI / setActiveProvider vem via deps pra evitar acoplamento direto,
 // mas como search.js ja eh importado em main, pegamos via deps em initApi.
 
@@ -50,14 +56,22 @@ const actions = {
 
   // gizmo
   setGizmoMode(mode) {
-    if (!['translate', 'rotate', 'scale'].includes(mode)) {
+    if (!['translate', 'rotate', 'scale', 'contextual'].includes(mode)) {
       throw new Error(`modo invalido: ${mode}`);
     }
-    setGizmoMode(mode);
-    d_syncModeButtons();
+    if (mode === 'contextual') {
+      setContextualMode(true);
+    } else {
+      setContextualMode(false);
+      setGizmoMode(mode);
+      d_syncModeButtons();
+    }
     return mode;
   },
-  getGizmoMode() { return getGizmoMode(); },
+  getGizmoMode() {
+    if (isContextualMode()) return 'contextual';
+    return getGizmoMode();
+  },
 
   // selecao
   selectByName(name) {
@@ -163,6 +177,31 @@ const actions = {
     // refletir o estado novo do toggle (texto + classe .active).
     notifySceneChanged();
     return { sceneId, freeTransform: obj.userData.freeTransform };
+  },
+
+  // D.3: cadeado — toggla freeTransform por objeto
+  toggleLock(sceneId) {
+    const obj = getUserObjects().find(o => o.userData?.sceneId === sceneId);
+    if (!obj) throw new Error(`objeto nao encontrado: ${sceneId}`);
+    cgToggleLock(obj);
+    return { sceneId, locked: !obj.userData.freeTransform };
+  },
+  setObjectLock(sceneId, locked) {
+    const obj = getUserObjects().find(o => o.userData?.sceneId === sceneId);
+    if (!obj) throw new Error(`objeto nao encontrado: ${sceneId}`);
+    obj.userData.freeTransform = !locked;
+    if (locked && !obj.userData.freeTransform) snap.applySnapToObject(obj);
+    notifySceneChanged();
+    return { sceneId, locked };
+  },
+
+  // D.1/D.2: move objeto programaticamente pela pipeline sweep+surface.
+  // Retorna posição final. Crítico pra QA testar headless.
+  dragObjectTo(sceneId, targetXZ) {
+    const obj = getUserObjects().find(o => o.userData?.sceneId === sceneId);
+    if (!obj) throw new Error(`objeto nao encontrado: ${sceneId}`);
+    const pos = cgDragObjectTo(obj, targetXZ, userRoot);
+    return { sceneId, position: pos.toArray() };
   },
 
   // Fase 3: footprint editavel via API. valida w,d inteiros >= 1.
@@ -285,7 +324,10 @@ const state = {
     const d = ensureDeps();
     return d.getLastResults().slice();
   },
-  gizmoMode() { return getGizmoMode(); },
+  gizmoMode() {
+    if (isContextualMode()) return 'contextual';
+    return getGizmoMode();
+  },
   activeProvider() {
     const d = ensureDeps();
     return d.getActiveProvider();
@@ -298,6 +340,25 @@ const state = {
     const obj = getUserObjects().find(o => o.userData?.sceneId === sceneId);
     if (!obj) return null;
     return !!obj.userData.freeTransform;
+  },
+
+  // D.3: isLocked é o inverso de freeTransform — leitura natural pra QA
+  isLocked(sceneId) {
+    const obj = getUserObjects().find(o => o.userData?.sceneId === sceneId);
+    if (!obj) return null;
+    return !obj.userData.freeTransform;
+  },
+
+  // D.1/D.2: retorna AABB atual do objeto (min/max como arrays)
+  objectAABB(sceneId) {
+    const obj = getUserObjects().find(o => o.userData?.sceneId === sceneId);
+    if (!obj) return null;
+    const box = physics.getAABB(obj);
+    if (!box) return null;
+    return {
+      min: box.min.toArray(),
+      max: box.max.toArray(),
+    };
   },
   // Fase 3: footprint + anchor por objeto
   objectFootprint(sceneId) {

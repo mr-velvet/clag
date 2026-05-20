@@ -17,18 +17,21 @@
 
 import * as THREE from 'three';
 
-const LS_ENABLED = 'clag:snap-enabled';
-const LS_GRID    = 'clag:grid-size';
-const LS_ROT     = 'clag:rot-step';
+const LS_ENABLED        = 'clag:snap-enabled';
+const LS_GRID           = 'clag:grid-size';
+const LS_ROT            = 'clag:rot-step';
+const LS_SURFACE_SNAP   = 'clag:surface-snap-enabled';
 
-const DEFAULT_ENABLED  = true;
-const DEFAULT_GRID     = 0.5;
-const DEFAULT_ROT_DEG  = 15;
+const DEFAULT_ENABLED       = false; // D.3: surface-snap é o default novo; grid vira opt-in
+const DEFAULT_GRID          = 0.5;
+const DEFAULT_ROT_DEG       = 15;
+const DEFAULT_SURFACE_SNAP  = true;
 
 // estado
-let _enabled = DEFAULT_ENABLED;
-let _gridSize = DEFAULT_GRID;
-let _rotStep  = DEFAULT_ROT_DEG; // em graus
+let _enabled       = DEFAULT_ENABLED;
+let _gridSize      = DEFAULT_GRID;
+let _rotStep       = DEFAULT_ROT_DEG; // em graus
+let _surfaceSnap   = DEFAULT_SURFACE_SNAP;
 
 // mini event bus interno
 const _subs = new Set();
@@ -44,6 +47,8 @@ export function on(event, cb) {
 }
 
 // boot — carrega de localStorage com fallback
+// Migração D.3: se clag:snap-enabled nunca foi gravado (boot zero), usa
+// DEFAULT_ENABLED=false (grid snap OFF) e DEFAULT_SURFACE_SNAP=true.
 (function loadFromStorage() {
   try {
     const e = localStorage.getItem(LS_ENABLED);
@@ -54,6 +59,9 @@ export function on(event, cb) {
 
     const r = parseFloat(localStorage.getItem(LS_ROT));
     if (Number.isFinite(r) && r > 0 && r <= 90) _rotStep = r;
+
+    const ss = localStorage.getItem(LS_SURFACE_SNAP);
+    if (ss === 'true' || ss === 'false') _surfaceSnap = (ss === 'true');
   } catch (_) { /* ignora — localStorage pode estar bloqueado */ }
 })();
 
@@ -91,8 +99,19 @@ export function setRotStep(deg) {
   return _rotStep;
 }
 
+// surface snap getter/setter (D.3)
+export function isSurfaceSnapEnabled() { return _surfaceSnap; }
+export function setSurfaceSnapEnabled(v) {
+  const next = !!v;
+  if (next === _surfaceSnap) return _surfaceSnap;
+  _surfaceSnap = next;
+  try { localStorage.setItem(LS_SURFACE_SNAP, _surfaceSnap ? 'true' : 'false'); } catch (_) {}
+  emit();
+  return _surfaceSnap;
+}
+
 function snapshot() {
-  return { enabled: _enabled, gridSize: _gridSize, rotStep: _rotStep };
+  return { enabled: _enabled, gridSize: _gridSize, rotStep: _rotStep, surfaceSnap: _surfaceSnap };
 }
 
 // -------------------- snap puro (funcoes utilitarias) --------------------

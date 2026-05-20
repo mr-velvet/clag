@@ -1,7 +1,7 @@
 import {
   bootViewport, on, setGizmoMode, getGizmoMode,
   getSelected, setSelected, removeFromScene, duplicateObject,
-  notifySceneChanged,
+  notifySceneChanged, userRoot,
 } from './scene.js';
 import { addCube, addSphere, addPlane, addPointLight } from './primitives.js';
 import { initOutliner } from './outliner.js';
@@ -21,6 +21,8 @@ import { providerMap } from './providers/index.js';
 import { addToScene } from './scene.js';
 import { initApi } from './api.js';
 import { createRoom, removeRoom, getRoomDimensions, hasRoom } from './room.js';
+import { initContextualGizmo } from './contextual-gizmo.js';
+import * as physics from './physics.js';
 import * as THREE from 'three';
 
 const $ = id => document.getElementById(id);
@@ -28,6 +30,8 @@ const $ = id => document.getElementById(id);
 // boot
 initToast($('toast-stack'));
 bootViewport($('viewport'));
+// D.3: gizmo contextual — drag-to-translate + cadeado overlay
+initContextualGizmo({ container: $('viewport-wrap') });
 initOutliner($('outliner'));
 initInspector($('inspector'));
 initSearch({
@@ -404,12 +408,17 @@ $('toggle-right').addEventListener('click', () => appEl.classList.toggle('no-rig
 const ground = addPlane();
 ground.scale.set(2.5, 1, 2.5);  // 20x20
 ground.name = 'Ground';
-// Fix B (Fase 3): coordenadas multiplo de 0.5 (gridSize default) pra
-// cena starter nascer alinhada ao grid — coerente com snap default ON.
+// D.3: grid snap agora é OFF por default (surface-snap é o novo default).
+// addToScene já chama applySnapToObject, que respeita o novo DEFAULT_ENABLED=false.
 const cube = addCube();
 cube.position.set(-1.5, 0.5, 0);
 const sphere = addSphere();
 sphere.position.set(1.5, 0.6, 0);
+
+// idempotência: garante que todos os objetos da cena starter têm AABB registrado
+// (addToScene já registra, mas qualquer objeto que entrar via persist.load também
+// passa por addToScene — então registerAll é só segurança extra no boot).
+physics.registerAll(userRoot);
 
 // deseleciona pra inspector mostrar "nenhum objeto selecionado" no boot
 setSelected(null);
