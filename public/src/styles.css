@@ -102,6 +102,102 @@ body {
 .btn.mode { padding: 4px 7px; min-width: 28px; font-size: 13px; }
 .btn.mode.active { background: var(--accent-strong); border-color: var(--accent-strong); color: white; }
 
+/* snap toggle + config */
+.snap-group { display: flex; gap: 2px; align-items: center; position: relative; }
+.btn.snap-toggle { font-size: 12px; padding: 4px 9px; }
+.btn.snap-toggle.active { background: var(--accent-strong); border-color: var(--accent-strong); color: white; }
+.btn.snap-config { padding: 4px 7px; min-width: 26px; font-size: 13px; color: var(--text-1); }
+.btn.snap-config[aria-expanded="true"] { background: var(--bg-3); border-color: var(--accent); color: var(--accent); }
+
+/* popover de config de snap — custom (nada de prompt nativo) */
+.snap-popover {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  min-width: 220px;
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 10px 12px;
+  z-index: 200;
+  box-shadow: 0 6px 24px rgba(0,0,0,0.4);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.snap-popover.hidden { display: none; }
+.snap-popover-title {
+  font-size: 11px;
+  text-transform: uppercase;
+  color: var(--text-2);
+  letter-spacing: 0.5px;
+  font-weight: 600;
+  margin-bottom: 2px;
+}
+.snap-popover-row {
+  display: grid;
+  grid-template-columns: 1fr 72px;
+  gap: 8px;
+  align-items: center;
+}
+.snap-popover-row label {
+  font-size: 12px;
+  color: var(--text-1);
+}
+.snap-popover-row input[type=number] {
+  background: var(--bg-1);
+  border: 1px solid var(--border);
+  color: var(--text-0);
+  padding: 4px 6px;
+  font: 12px ui-monospace, Menlo, monospace;
+  border-radius: 3px;
+  width: 100%;
+  min-width: 0;
+}
+.snap-popover-row input[type=number]:focus { outline: none; border-color: var(--accent); }
+.snap-popover-hint {
+  font-size: 10.5px;
+  color: var(--text-2);
+  line-height: 1.4;
+  margin-top: 2px;
+}
+
+/* inspector: toggle de posicionamento livre por-objeto */
+.insp-free-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  cursor: pointer;
+  font: inherit;
+  font-size: 12px;
+  color: var(--text-1);
+  width: 100%;
+  text-align: left;
+  transition: background 0.12s, border-color 0.12s, color 0.12s;
+}
+.insp-free-toggle:hover { background: var(--bg-3); }
+.insp-free-toggle.active {
+  background: rgba(106,169,255,0.12);
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.insp-free-toggle .toggle-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--bg-3);
+  border: 1px solid var(--border);
+  flex-shrink: 0;
+}
+.insp-free-toggle.active .toggle-dot {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
 /* main grid — viewport tem que sobreviver mesmo em telas pequenas */
 #main {
   display: grid;

@@ -23,6 +23,7 @@ import {
 } from './scene.js';
 import { providers, providerMap, searchAll } from './providers/index.js';
 import { getTree, getLeaf, allLeaves } from './catalog.js';
+import * as snap from './snap.js';
 // runSearchUI / setActiveProvider vem via deps pra evitar acoplamento direto,
 // mas como search.js ja eh importado em main, pegamos via deps em initApi.
 
@@ -138,6 +139,31 @@ const actions = {
     return !document.getElementById('app').classList.contains('no-right');
   },
 
+  // snap (Fase 2) — encaixar a grade
+  toggleSnap() {
+    return snap.setEnabled(!snap.isEnabled());
+  },
+  setSnapEnabled(v) {
+    return snap.setEnabled(v);
+  },
+  setGridSize(n) {
+    return snap.setGridSize(n);
+  },
+  setRotStep(deg) {
+    return snap.setRotStep(deg);
+  },
+  setObjectFreeTransform(sceneId, free) {
+    const obj = getUserObjects().find(o => o.userData?.sceneId === sceneId);
+    if (!obj) throw new Error(`objeto nao encontrado: ${sceneId}`);
+    obj.userData.freeTransform = !!free;
+    // se voltou a snapar, aplica imediatamente
+    if (!obj.userData.freeTransform) snap.applySnapToObject(obj);
+    // dispara re-render do inspector via sceneChanged
+    const d = ensureDeps();
+    if (d.notifyChange) d.notifyChange();
+    return { sceneId, freeTransform: obj.userData.freeTransform };
+  },
+
   // catalogo (Fase 1)
   catalog: {
     tree() { return getTree(); },
@@ -192,6 +218,15 @@ const state = {
   activeProvider() {
     const d = ensureDeps();
     return d.getActiveProvider();
+  },
+  // snap state (Fase 2)
+  snapEnabled() { return snap.isEnabled(); },
+  gridSize() { return snap.getGridSize(); },
+  rotStep() { return snap.getRotStep(); },
+  isObjectFreeTransform(sceneId) {
+    const obj = getUserObjects().find(o => o.userData?.sceneId === sceneId);
+    if (!obj) return null;
+    return !!obj.userData.freeTransform;
   },
   isPanelOpen(side) {
     const el = document.getElementById('app');

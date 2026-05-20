@@ -15,7 +15,7 @@ function render() {
   root.innerHTML = '';
   const items = getUserObjects();
   if (items.length === 0) {
-    root.innerHTML = `<div style="padding:14px;color:var(--text-2);font-style:italic;text-align:center">empty scene</div>`;
+    root.innerHTML = `<div style="padding:14px;color:var(--text-2);font-style:italic;text-align:center">cena vazia</div>`;
     return;
   }
   for (const obj of items) {

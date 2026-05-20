@@ -1,6 +1,6 @@
 # PROGRESS — clag
 
-Última atualização: 2026-05-20 (Fase 0 e 1 do SIMS-MODE entregues — api programática + catálogo semântico; patch pós-revisão PM/QA: i18n PT-BR + actions.setProvider + runSearch renderizando grade)
+Última atualização: 2026-05-20 (Fase 2 do SIMS-MODE entregue — snap + grid como default, popover de config, toggle por-objeto, atalho G; backlog: outliner+topbar PT-BR, queries duplicadas diferenciadas)
 
 ## como usar este arquivo
 
@@ -63,6 +63,7 @@ Resumo — detalhe em PRINCIPLES.md:
 
 ## histórico
 
+- **2026-05-20 (Fase 2 SIMS-MODE)**: `public/src/snap.js` novo — estado `enabled/gridSize/rotStep` em localStorage, snap XZ + rotação discreta, respeita `obj.userData.freeTransform`. `scene.js` integra snap no `objectChange` do gizmo, no `addToScene`, e expõe `rebuildGrid()` reativo a `snap.gridSize`. Topbar ganha `📐 encaixar` (toggle) + `⚙` (popover custom com inputs grid/rot) e atalho `G`. Inspector ganha botão "posicionamento livre" por-objeto. Em `api.js`: `actions.toggleSnap/setSnapEnabled/setGridSize/setRotStep/setObjectFreeTransform` e `state.snapEnabled/gridSize/rotStep/isObjectFreeTransform`. Topbar 100% PT-BR (cubo/esfera/plano/luz, salvar/carregar/apagar/duplicar, tooltips). `outliner.js:18` `empty scene` → `cena vazia`. `catalog.js`: queries duplicadas diferenciadas (`coffee table`, `dining table`, `dining chair`, `office chair`, `tv stand`, `filing cabinet`, `floor lamp`, `desk lamp`, `street light`, `bathroom sink`, `bathroom mirror`, `office plant`).
 - **2026-05-20 (patch pós-revisão Fase 0+1)**: `search.js` exporta `runSearchUI` / `setActiveProvider` / `getActiveProvider`; `api.js` agora delega `actions.runSearch` à UI (grade visual atualiza) e expõe `actions.setProvider` + `state.activeProvider` — fecha bugs 1 e 2 do QA. i18n PT-BR aplicado em placeholder/hint/toasts/menu de provider/HUD/help de viewport. `catalog.js`: queries de ~21 folhas simplificadas pra 1 palavra (`'house plant pot'` → `'plant'`, `'kitchen sink'` → `'sink'`, etc.) — catálogo guiado deixa de cair só em Sketchfab.
 - **2026-05-20**: SIMS-MODE Fase 0 + Fase 1 entregues. Fase 0: `public/src/api.js` expõe `window.clag = { actions, state }`, `data-clag-action` em todos os botões. Fase 1: `public/src/catalog.js` com árvore de 6 categorias (Sala, Cozinha, Quarto, Banheiro, Escritório, Exterior), aba "Catálogo" no asset browser coexistindo com "Buscar". Click em folha dispara `searchAll(query)`. Comportamento existente intacto.
 

@@ -47,10 +47,12 @@ function render() {
   root.appendChild(idSec);
 
   // -- transform section
-  const tSec = section('transform');
-  tSec.appendChild(vec3Row('position', obj.position, 0.01, () => notifySceneChanged()));
-  tSec.appendChild(vec3RowEuler('rotation', obj.rotation, () => notifySceneChanged()));
-  tSec.appendChild(vec3Row('scale', obj.scale, 0.01, () => notifySceneChanged()));
+  const tSec = section('posição');
+  // toggle "posicionamento livre" — desliga snap so neste objeto (Fase 2 Sims-mode)
+  tSec.appendChild(freeTransformToggle(obj));
+  tSec.appendChild(vec3Row('posição', obj.position, 0.01, () => notifySceneChanged()));
+  tSec.appendChild(vec3RowEuler('rotação', obj.rotation, () => notifySceneChanged()));
+  tSec.appendChild(vec3Row('escala', obj.scale, 0.01, () => notifySceneChanged()));
   root.appendChild(tSec);
 
   // -- material section (if the object has at least one mesh with a material)
@@ -187,6 +189,34 @@ function linkRow(label, text, href) {
   a.style.textOverflow = 'ellipsis';
   a.style.whiteSpace = 'nowrap';
   r.appendChild(a);
+  return r;
+}
+
+// botao-toggle de "posicionamento livre" — quando ativo, snap nao mexe no obj.
+function freeTransformToggle(obj) {
+  const r = document.createElement('div');
+  r.className = 'insp-row';
+  r.style.gridTemplateColumns = '1fr';
+  r.style.marginBottom = '8px';
+  const btn = document.createElement('button');
+  btn.type = 'button';
+  btn.className = 'insp-free-toggle';
+  btn.dataset.clagAction = 'toggle-free-transform';
+  function sync() {
+    const isFree = !!obj.userData.freeTransform;
+    btn.classList.toggle('active', isFree);
+    btn.innerHTML = `<span class="toggle-dot"></span>${isFree ? 'posicionamento livre (ignora encaixe)' : 'encaixar na grade'}`;
+    btn.title = isFree
+      ? 'snap desligado para este objeto — clique para encaixar'
+      : 'snap aplicado a este objeto — clique para liberar';
+  }
+  btn.addEventListener('click', () => {
+    obj.userData.freeTransform = !obj.userData.freeTransform;
+    sync();
+    notifySceneChanged();
+  });
+  sync();
+  r.appendChild(btn);
   return r;
 }
 

@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { TransformControls } from 'three/addons/controls/TransformControls.js';
+import * as snap from './snap.js';
 
 // world singletons (exported for other modules)
 export const scene = new THREE.Scene();
@@ -41,6 +42,28 @@ function emit(event, payload) {
 
 let selected = null;
 
+// grid helper — recriado quando snap.gridSize muda
+let _gridHelper = null;
+const GRID_EXTENT = 30; // metros
+
+export function rebuildGrid() {
+  if (_gridHelper) {
+    helpersRoot.remove(_gridHelper);
+    if (_gridHelper.geometry) _gridHelper.geometry.dispose();
+    if (_gridHelper.material) _gridHelper.material.dispose();
+    _gridHelper = null;
+  }
+  const size = snap.getGridSize();
+  // divisoes = total / cell — cap pra evitar explosao se user botar grid muito fino
+  const divisions = Math.min(600, Math.max(2, Math.round(GRID_EXTENT / size)));
+  _gridHelper = new THREE.GridHelper(GRID_EXTENT, divisions, 0x4a5570, 0x2a3144);
+  // opacidade um pouco menor quando snap off — sinal visual sutil
+  _gridHelper.material.opacity = snap.isEnabled() ? 0.85 : 0.45;
+  _gridHelper.material.transparent = true;
+  _gridHelper.position.y = -0.001;
+  helpersRoot.add(_gridHelper);
+}
+
 export function getSelected() { return selected; }
 
 export function setSelected(obj) {
@@ -72,12 +95,9 @@ export function bootViewport(container) {
   orbit.dampingFactor = 0.08;
   orbit.target.set(0, 0.5, 0);
 
-  // helpers — grid maior e mais visível
-  const grid = new THREE.GridHelper(60, 60, 0x4a5570, 0x2a3144);
-  grid.material.opacity = 0.85;
-  grid.material.transparent = true;
-  grid.position.y = -0.001;
-  helpersRoot.add(grid);
+  // grid — tamanho fixo 30m × 30m, divisoes refletem snap.gridSize
+  rebuildGrid();
+  snap.on('snapChanged', rebuildGrid);
 
   // origin axes — pequeno indicador visual
   const axes = new THREE.AxesHelper(1.5);
@@ -112,8 +132,16 @@ export function bootViewport(container) {
   // newer three.js exposes the gizmo as a child .getHelper()
   const gizmoHelper = typeof gizmo.getHelper === 'function' ? gizmo.getHelper() : gizmo;
   scene.add(gizmoHelper);
-  gizmo.addEventListener('dragging-changed', e => { orbit.enabled = !e.value; });
-  gizmo.addEventListener('objectChange', () => emit('sceneChanged'));
+  gizmo.addEventListener('dragging-changed', e => {
+    orbit.enabled = !e.value;
+    // ao soltar o gizmo, garante snap final (caso event objectChange tenha sido throttled).
+    if (!e.value && selected) snap.applySnapToObject(selected);
+  });
+  gizmo.addEventListener('objectChange', () => {
+    // snap continuo enquanto user arrasta — efeito "pula pro tile" e desejado.
+    if (selected) snap.applySnapToObject(selected);
+    emit('sceneChanged');
+  });
 
   // click selection (raycast against userRoot only)
   const raycaster = new THREE.Raycaster();
@@ -165,6 +193,10 @@ export function bootViewport(container) {
     if (ev.key === 'w' || ev.key === 'W') setGizmoMode('translate');
     else if (ev.key === 'e' || ev.key === 'E') setGizmoMode('rotate');
     else if (ev.key === 'r' || ev.key === 'R') setGizmoMode('scale');
+    else if (ev.key === 'g' || ev.key === 'G') {
+      // toggle snap — efeito visual via rebuildGrid (subscribed acima)
+      snap.setEnabled(!snap.isEnabled());
+    }
     else if (ev.key === 'Delete' || ev.key === 'Backspace') {
       if (selected) removeFromScene(selected);
     } else if ((ev.ctrlKey || ev.metaKey) && (ev.key === 'd' || ev.key === 'D')) {
@@ -205,6 +237,8 @@ export function addToScene(object, opts = {}) {
     }
   });
   if (opts.position) object.position.copy(opts.position);
+  // snap inicial — XZ + rotacao discreta. Respeita freeTransform por-objeto.
+  snap.applySnapToObject(object);
   userRoot.add(object);
   emit('sceneChanged');
   setSelected(object);
