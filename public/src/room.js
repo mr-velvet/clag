@@ -72,6 +72,15 @@ export function createRoom({ width = 6, depth = 5, height = 2.7 } = {}) {
   // remove sala anterior (se houver) — substitui.
   removeRoom();
 
+  // PM #3: remove Ground starter (cena de boot) pra evitar z-fight com
+  // o piso da sala (ambos em y=0). Conservador: so remove objeto cujo
+  // name === 'Ground' (nao remove outros planes criados pelo user).
+  const groundsToRemove = [];
+  for (const c of userRoot.children) {
+    if (c.name === 'Ground') groundsToRemove.push(c);
+  }
+  for (const g of groundsToRemove) removeFromScene(g);
+
   const created = [];
 
   // piso — Box fino (recebe sombra). Centro em y = -thickness/2 (topo em y=0).

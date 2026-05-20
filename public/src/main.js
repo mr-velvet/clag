@@ -221,7 +221,7 @@ function buildRoomModal() {
   overlay.innerHTML = `
     <div class="modal-card" role="dialog" aria-labelledby="room-modal-title">
       <div class="modal-title" id="room-modal-title">nova sala</div>
-      <div class="modal-subtitle">paredes, piso e teto serão criados ao redor da origem. já existir uma sala, ela é substituída.</div>
+      <div class="modal-subtitle">paredes, piso e teto serão criados ao redor da origem. se já existir uma sala, ela será substituída — cores das paredes voltam ao padrão.</div>
       <div class="modal-row">
         <label for="room-w-input">largura (m)</label>
         <input id="room-w-input" type="number" min="1" max="50" step="0.1" value="6" />

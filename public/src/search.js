@@ -287,22 +287,21 @@ export function applyAnchor(obj, dropPos, opts = {}) {
   if (anchor === 'ceiling') {
     const ceiling = findUserChildByKind('room:ceiling');
     if (ceiling) {
-      // ceilingY = face de baixo do teto. Centraliza topo do objeto no
-      // teto: centro fica em ceilingY - boxSize.y/2 (Obs 12 QA). Antes
-      // colocava Y = ceilingY - boxSize.y, o que deixava o centro abaixo
-      // do esperado pra luminarias com altura significativa.
+      // ceilingY = face de baixo do teto. Cola o topo atual do objeto
+      // no teto, agnostico ao pivot (delta entre topo desejado e topo
+      // atual). Antes usava `ceilingY - boxSize.y/2`, que assumia pivot
+      // no centro do bbox — Bug 9: assets com pivot no topo do mesh
+      // (Chandelier 01 etc.) ficavam ~40cm abaixo do teto.
       const box = new THREE.Box3().setFromObject(ceiling);
       const ceilingY = box.min.y; // face inferior do teto
       const objBox = new THREE.Box3().setFromObject(obj);
-      const objHeight = objBox.getSize(new THREE.Vector3()).y;
-      obj.position.y = ceilingY - objHeight / 2;
+      obj.position.y += (ceilingY - objBox.max.y);
       obj.userData.anchorApplied = 'ceiling';
     } else {
       // fallback: teto padrao 2.7m. objeto "pendura" do teto fictício.
-      // Mesma matematica: topo do objeto encosta no teto virtual.
+      // Mesma logica delta-topo do branch acima (Bug 9).
       const objBox = new THREE.Box3().setFromObject(obj);
-      const objHeight = objBox.getSize(new THREE.Vector3()).y;
-      obj.position.y = ROOM_HEIGHT_DEFAULT - objHeight / 2;
+      obj.position.y += (ROOM_HEIGHT_DEFAULT - objBox.max.y);
       obj.userData.anchorApplied = 'ceiling-fallback';
       if (!silent) toast('sem sala — luz pendurada no teto virtual (2.7m)', { kind: 'warn' });
     }

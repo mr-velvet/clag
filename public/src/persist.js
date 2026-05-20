@@ -38,6 +38,10 @@ function serializeObj(obj) {
   if (obj.userData?.anchor) o.anchor = obj.userData.anchor;
   if (Array.isArray(obj.userData?.footprint)) o.footprint = [...obj.userData.footprint];
   if (obj.userData?.freeTransform) o.freeTransform = true;
+  // Bug 10: persistir anchorApplied (runtime tag: 'ceiling' | 'ceiling-fallback'
+  // | 'wall' | 'wall-fallback' | 'floor'). Sem isso, state.objectAnchorApplied
+  // virava null apos save+load mesmo com objeto na posicao certa.
+  if (obj.userData?.anchorApplied) o.anchorApplied = obj.userData.anchorApplied;
   // primitive: persist color of the first material
   const mat = firstMat(obj);
   if (mat?.color) {
@@ -158,4 +162,6 @@ function applySimsMeta(obj, saved) {
   if (saved.anchor) obj.userData.anchor = saved.anchor;
   if (Array.isArray(saved.footprint)) obj.userData.footprint = [...saved.footprint];
   if (saved.freeTransform) obj.userData.freeTransform = true;
+  // Bug 10: restaura anchorApplied (introspecao pos-load via state API).
+  if (saved.anchorApplied) obj.userData.anchorApplied = saved.anchorApplied;
 }
