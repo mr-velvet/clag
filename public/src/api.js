@@ -20,6 +20,7 @@ import {
   setGizmoMode, getGizmoMode,
   getUserObjects, userRoot,
   worldPointAtScreen, renderer,
+  notifySceneChanged,
 } from './scene.js';
 import { providers, providerMap, searchAll } from './providers/index.js';
 import { getTree, getLeaf, allLeaves } from './catalog.js';
@@ -158,10 +159,45 @@ const actions = {
     obj.userData.freeTransform = !!free;
     // se voltou a snapar, aplica imediatamente
     if (!obj.userData.freeTransform) snap.applySnapToObject(obj);
-    // dispara re-render do inspector via sceneChanged
-    const d = ensureDeps();
-    if (d.notifyChange) d.notifyChange();
+    // Fix Bug 5: emite sceneChanged direto pra inspector re-renderizar e
+    // refletir o estado novo do toggle (texto + classe .active).
+    notifySceneChanged();
     return { sceneId, freeTransform: obj.userData.freeTransform };
+  },
+
+  // Fase 3: footprint editavel via API. valida w,d inteiros >= 1.
+  setObjectFootprint(sceneId, footprint) {
+    const obj = getUserObjects().find(o => o.userData?.sceneId === sceneId);
+    if (!obj) throw new Error(`objeto nao encontrado: ${sceneId}`);
+    if (!Array.isArray(footprint) || footprint.length !== 2) {
+      throw new Error(`footprint invalido (esperado [w, d]): ${JSON.stringify(footprint)}`);
+    }
+    const w = parseInt(footprint[0], 10);
+    const d = parseInt(footprint[1], 10);
+    if (!Number.isInteger(w) || !Number.isInteger(d) || w < 1 || d < 1) {
+      throw new Error(`footprint invalido (precisa inteiros >= 1): ${JSON.stringify(footprint)}`);
+    }
+    obj.userData.footprint = [w, d];
+    if (obj.userData.assetMeta) obj.userData.assetMeta.footprint = [w, d];
+    snap.applySnapToObject(obj);
+    notifySceneChanged();
+    return { sceneId, footprint: [w, d] };
+  },
+
+  // Fase 3: anchor editavel via API. floor | wall | ceiling.
+  setObjectAnchor(sceneId, anchor) {
+    const obj = getUserObjects().find(o => o.userData?.sceneId === sceneId);
+    if (!obj) throw new Error(`objeto nao encontrado: ${sceneId}`);
+    if (!['floor', 'wall', 'ceiling'].includes(anchor)) {
+      throw new Error(`anchor invalido (esperado floor|wall|ceiling): ${anchor}`);
+    }
+    obj.userData.anchor = anchor;
+    if (obj.userData.assetMeta) obj.userData.assetMeta.anchor = anchor;
+    const d = ensureDeps();
+    if (d.applyAnchor) d.applyAnchor(obj, obj.position.clone());
+    snap.applySnapToObject(obj);
+    notifySceneChanged();
+    return { sceneId, anchor };
   },
 
   // catalogo (Fase 1)
@@ -227,6 +263,18 @@ const state = {
     const obj = getUserObjects().find(o => o.userData?.sceneId === sceneId);
     if (!obj) return null;
     return !!obj.userData.freeTransform;
+  },
+  // Fase 3: footprint + anchor por objeto
+  objectFootprint(sceneId) {
+    const obj = getUserObjects().find(o => o.userData?.sceneId === sceneId);
+    if (!obj) return null;
+    const fp = obj.userData?.footprint;
+    return Array.isArray(fp) ? [fp[0], fp[1]] : [1, 1];
+  },
+  objectAnchor(sceneId) {
+    const obj = getUserObjects().find(o => o.userData?.sceneId === sceneId);
+    if (!obj) return null;
+    return obj.userData?.anchor || 'floor';
   },
   isPanelOpen(side) {
     const el = document.getElementById('app');

@@ -1,7 +1,12 @@
+import * as THREE from 'three';
 import { providers, providerMap, searchAll } from './providers/index.js';
 import { loadModelFromUrl } from './loader.js';
-import { addToScene, worldPointAtScreen } from './scene.js';
+import { addToScene, worldPointAtScreen, userRoot } from './scene.js';
 import { toast } from './toast.js';
+
+// altura de teto padrao usada como fallback quando nao ha sala
+// (Fase 3 — anchor='ceiling' sem room:ceiling cola nesse valor).
+const ROOM_HEIGHT_DEFAULT = 2.7;
 
 let activeProviderId = 'all';
 let lastResults = [];
@@ -11,6 +16,7 @@ let currentSearchAbort = null;
 export function getLastResults() { return lastResults; }
 export function setLastResults(items) { lastResults = items; }
 export { downloadAndPlace };
+// applyAnchor exportado abaixo (declarado adiante).
 
 // expoe pra api.js: dirige a UI da aba Buscar (input, provider, render)
 // asim a API espelha exatamente o caminho UI — fecha bug 1 do QA.
@@ -229,9 +235,16 @@ async function downloadAndPlace(item, position) {
       format: ext || item.format,
       raw: item.raw,
       thumb: item.thumb,
+      // Fase 3: defaults de posicionamento herdados do catalogo (se vieram).
+      anchor: item.anchor || 'floor',
+      footprint: Array.isArray(item.footprint) ? [item.footprint[0], item.footprint[1]] : [1, 1],
     };
+    // propaga pro topo do userData pra leitura barata (snap, inspector, api)
+    obj.userData.anchor = obj.userData.assetMeta.anchor;
+    obj.userData.footprint = obj.userData.assetMeta.footprint;
     obj.name = item.name;
     addToScene(obj, { name: item.name, idPrefix: 'asset', position });
+    applyAnchor(obj, position);
     t.setKind('success');
     t.update(`"${item.name}" adicionado`);
     setTimeout(() => t.dismiss(), 1500);
@@ -242,6 +255,97 @@ async function downloadAndPlace(item, position) {
     t.update(`falhou: ${e.message}`);
     setTimeout(() => t.dismiss(), 6000);
   }
+}
+
+// aplica regra de ancoragem ao objeto recem-adicionado (Fase 3 Sims-mode).
+//
+// - floor: ja eh o comportamento padrao (asset entra com Y=0 do loader). nop.
+// - ceiling: se ha `room:ceiling`, alinha Y a altura dele; sem sala, usa
+//   ROOM_HEIGHT_DEFAULT como fallback. marca anchorApplied.
+// - wall: tenta raycast da posicao de drop em direcao a cada parede
+//   `room:wall`; se acerta, cola na parede (posiciona no hit, alinha
+//   rotacao Y com a normal da parede); sem sala, fallback (mantem floor).
+//
+// Helper publico — chamavel por inspector quando muda anchor depois.
+export function applyAnchor(obj, dropPos) {
+  const anchor = obj?.userData?.anchor || 'floor';
+  if (anchor === 'floor') {
+    obj.userData.anchorApplied = 'floor';
+    return;
+  }
+  if (anchor === 'ceiling') {
+    const ceiling = findUserChildByKind('room:ceiling');
+    if (ceiling) {
+      // alinha topo do objeto na altura do teto
+      const box = new THREE.Box3().setFromObject(obj);
+      const objHeight = box.getSize(new THREE.Vector3()).y;
+      obj.position.y = ceiling.position.y - objHeight;
+      obj.userData.anchorApplied = 'ceiling';
+    } else {
+      // fallback: teto padrao 2.7m. objeto "pendura" do teto fictício.
+      const box = new THREE.Box3().setFromObject(obj);
+      const objHeight = box.getSize(new THREE.Vector3()).y;
+      obj.position.y = ROOM_HEIGHT_DEFAULT - objHeight;
+      obj.userData.anchorApplied = 'ceiling-fallback';
+    }
+    return;
+  }
+  if (anchor === 'wall') {
+    const walls = findUserChildrenByKind('room:wall');
+    if (walls.length === 0 || !dropPos) {
+      // sem sala -> comportamento atual (chao). marca pra UI saber.
+      obj.userData.anchorApplied = 'wall-fallback';
+      return;
+    }
+    // raycast horizontal a partir do drop em direcao a cada parede.
+    // procura a parede mais proxima e cola o objeto la.
+    const origin = new THREE.Vector3(dropPos.x, 1.2, dropPos.z); // altura tipica
+    const raycaster = new THREE.Raycaster();
+    let best = null;
+    for (const wall of walls) {
+      const center = new THREE.Vector3();
+      new THREE.Box3().setFromObject(wall).getCenter(center);
+      const dir = new THREE.Vector3().subVectors(center, origin).setY(0).normalize();
+      raycaster.set(origin, dir);
+      raycaster.far = 50;
+      const hits = raycaster.intersectObject(wall, true);
+      if (hits.length > 0) {
+        const h = hits[0];
+        if (!best || h.distance < best.hit.distance) {
+          best = { hit: h, wall, dir };
+        }
+      }
+    }
+    if (best) {
+      obj.position.copy(best.hit.point);
+      // alinha rotacao Y pela normal (objeto "encostado" na parede)
+      if (best.hit.face?.normal) {
+        const worldNormal = best.hit.face.normal.clone()
+          .transformDirection(best.wall.matrixWorld).setY(0).normalize();
+        // angulo da normal apontando do drop pro centro do objeto
+        obj.rotation.y = Math.atan2(worldNormal.x, worldNormal.z);
+      }
+      obj.userData.anchorApplied = 'wall';
+    } else {
+      obj.userData.anchorApplied = 'wall-fallback';
+    }
+    return;
+  }
+}
+
+function findUserChildByKind(kind) {
+  for (const c of userRoot.children) {
+    if (c.userData?.kind === kind) return c;
+  }
+  return null;
+}
+
+function findUserChildrenByKind(kind) {
+  const out = [];
+  for (const c of userRoot.children) {
+    if (c.userData?.kind === kind) out.push(c);
+  }
+  return out;
 }
 
 function formatBytes(n) {

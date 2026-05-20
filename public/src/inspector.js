@@ -1,5 +1,13 @@
 import * as THREE from 'three';
 import { on, getSelected, notifySceneChanged } from './scene.js';
+import * as snap from './snap.js';
+import { applyAnchor } from './search.js';
+
+const ANCHOR_LABELS = {
+  floor: 'Chão',
+  wall: 'Parede',
+  ceiling: 'Teto',
+};
 
 let root;
 
@@ -54,6 +62,11 @@ function render() {
   tSec.appendChild(vec3RowEuler('rotação', obj.rotation, () => notifySceneChanged()));
   tSec.appendChild(vec3Row('escala', obj.scale, 0.01, () => notifySceneChanged()));
   root.appendChild(tSec);
+
+  // -- posicionamento section (Fase 3 Sims-mode): footprint + apoio
+  // so faz sentido pra assets / primitivas — nao expor pra room:* etc.
+  // (room sera Fase 4; ate la mostra tudo, nao bloqueia leigo).
+  root.appendChild(positioningSection(obj));
 
   // -- material section (if the object has at least one mesh with a material)
   const matInfo = firstMaterial(obj);
@@ -218,6 +231,133 @@ function freeTransformToggle(obj) {
   sync();
   r.appendChild(btn);
   return r;
+}
+
+// Fase 3: secao "Posicionamento" — tamanho na grade (footprint) + apoio (anchor).
+function positioningSection(obj) {
+  const s = section('posicionamento');
+
+  // footprint: w × d em tiles inteiros (default [1, 1])
+  // Label "L × P" = Largura × Profundidade na grade. Inteiros >= 1.
+  const fp = Array.isArray(obj.userData.footprint) ? obj.userData.footprint : [1, 1];
+  const fpRow = row('tamanho');
+  const wrap = document.createElement('div');
+  wrap.className = 'vec3-row';
+  wrap.style.gridTemplateColumns = 'repeat(2, 1fr)';
+  const wCell = footprintCell('L', fp[0], v => updateFootprint(obj, v, null));
+  const dCell = footprintCell('P', fp[1], v => updateFootprint(obj, null, v));
+  wrap.append(wCell, dCell);
+  fpRow.appendChild(wrap);
+  s.appendChild(fpRow);
+
+  // anchor: dropdown custom (Chão / Parede / Teto)
+  const anchor = obj.userData.anchor || 'floor';
+  const anRow = row('apoio');
+  anRow.appendChild(anchorDropdown(obj, anchor));
+  s.appendChild(anRow);
+
+  return s;
+}
+
+function footprintCell(axisLabel, value, onChange) {
+  const cell = document.createElement('div');
+  cell.className = 'vec3-axis';
+  const span = document.createElement('span');
+  span.className = 'ax';
+  span.textContent = axisLabel;
+  span.style.color = 'var(--text-2)';
+  const inp = document.createElement('input');
+  inp.type = 'number';
+  inp.min = 1;
+  inp.step = 1;
+  inp.value = Math.max(1, Math.round(value));
+  inp.addEventListener('change', () => {
+    const v = Math.max(1, Math.round(parseFloat(inp.value) || 1));
+    inp.value = v;
+    onChange(v);
+  });
+  cell.append(span, inp);
+  return cell;
+}
+
+function updateFootprint(obj, w, d) {
+  const cur = Array.isArray(obj.userData.footprint) ? obj.userData.footprint : [1, 1];
+  const next = [
+    w == null ? cur[0] : Math.max(1, Math.round(w)),
+    d == null ? cur[1] : Math.max(1, Math.round(d)),
+  ];
+  obj.userData.footprint = next;
+  // sincroniza assetMeta se existir, pra persist gravar o valor atualizado
+  if (obj.userData.assetMeta) obj.userData.assetMeta.footprint = [next[0], next[1]];
+  // re-snapa com novo footprint
+  snap.applySnapToObject(obj);
+  notifySceneChanged();
+}
+
+// dropdown custom (NUNCA <select> nativo). botao + popup. fecha clicando fora.
+function anchorDropdown(obj, current) {
+  const wrap = document.createElement('div');
+  wrap.className = 'insp-anchor-wrap';
+
+  const btn = document.createElement('button');
+  btn.type = 'button';
+  btn.className = 'insp-anchor-btn';
+  btn.dataset.clagAction = 'anchor-menu-toggle';
+  btn.setAttribute('aria-haspopup', 'listbox');
+  btn.setAttribute('aria-expanded', 'false');
+  const labelSpan = document.createElement('span');
+  labelSpan.className = 'insp-anchor-label';
+  labelSpan.textContent = ANCHOR_LABELS[current] || ANCHOR_LABELS.floor;
+  const caret = document.createElement('span');
+  caret.className = 'caret';
+  caret.textContent = '▾';
+  btn.append(labelSpan, caret);
+
+  const menu = document.createElement('div');
+  menu.className = 'insp-anchor-menu hidden';
+  for (const id of ['floor', 'wall', 'ceiling']) {
+    const opt = document.createElement('button');
+    opt.type = 'button';
+    opt.className = 'insp-anchor-option' + (id === current ? ' active' : '');
+    opt.dataset.anchorId = id;
+    opt.textContent = ANCHOR_LABELS[id];
+    opt.addEventListener('click', () => {
+      obj.userData.anchor = id;
+      if (obj.userData.assetMeta) obj.userData.assetMeta.anchor = id;
+      // re-aplica anchor (re-posiciona Y). drop original era na posicao
+      // atual XZ; usamos a posicao XZ atual como referencia de "drop".
+      const ref = obj.position.clone();
+      applyAnchor(obj, ref);
+      snap.applySnapToObject(obj);
+      closeMenu();
+      notifySceneChanged();
+    });
+    menu.appendChild(opt);
+  }
+
+  let onDocDown = null;
+  function openMenu() {
+    menu.classList.remove('hidden');
+    btn.setAttribute('aria-expanded', 'true');
+    onDocDown = ev => {
+      if (wrap.contains(ev.target)) return;
+      closeMenu();
+    };
+    setTimeout(() => document.addEventListener('mousedown', onDocDown), 0);
+  }
+  function closeMenu() {
+    menu.classList.add('hidden');
+    btn.setAttribute('aria-expanded', 'false');
+    if (onDocDown) { document.removeEventListener('mousedown', onDocDown); onDocDown = null; }
+  }
+  btn.addEventListener('click', ev => {
+    ev.stopPropagation();
+    if (btn.getAttribute('aria-expanded') === 'true') closeMenu();
+    else openMenu();
+  });
+
+  wrap.append(btn, menu);
+  return wrap;
 }
 
 function vec3Row(label, vec, step, onChange) {

@@ -8,7 +8,7 @@ import { initOutliner } from './outliner.js';
 import { initInspector } from './inspector.js';
 import {
   initSearch, getLastResults, setLastResults, downloadAndPlace,
-  runSearchUI, setActiveProvider, getActiveProvider,
+  runSearchUI, setActiveProvider, getActiveProvider, applyAnchor,
 } from './search.js';
 import * as snap from './snap.js';
 import { initCatalogUI, searchCategory, showTab, expandCategory, collapseCategory, getExpandedCategories } from './catalog-ui.js';
@@ -81,13 +81,14 @@ on('selectionChanged', syncModeButtons);
 // snap toggle + popover de config (Fase 2 Sims-mode)
 const snapToggleBtn = $('btn-snap-toggle');
 const snapConfigBtn = $('btn-snap-config');
+// Fix C (Fase 3): texto do botao eh fixo "encaixar". So a classe .active +
+// cor + tooltip dao sinal de estado. Pattern de toggle (B do Word, VS Code).
 function syncSnapToggle() {
   const enabled = snap.isEnabled();
   snapToggleBtn.classList.toggle('active', enabled);
-  snapToggleBtn.textContent = enabled ? '📐 encaixar' : '📐 livre';
   snapToggleBtn.title = enabled
-    ? 'encaixe ativo — clique pra liberar posicionamento (G)'
-    : 'encaixe desligado — clique pra encaixar à grade (G)';
+    ? 'encaixe ativo (G) — clique pra liberar'
+    : 'encaixe desligado (G) — clique pra encaixar à grade';
 }
 snapToggleBtn.addEventListener('click', () => snap.setEnabled(!snap.isEnabled()));
 snap.on('snapChanged', syncSnapToggle);
@@ -225,10 +226,12 @@ $('toggle-right').addEventListener('click', () => appEl.classList.toggle('no-rig
 const ground = addPlane();
 ground.scale.set(2.5, 1, 2.5);  // 20x20
 ground.name = 'Ground';
+// Fix B (Fase 3): coordenadas multiplo de 0.5 (gridSize default) pra
+// cena starter nascer alinhada ao grid — coerente com snap default ON.
 const cube = addCube();
-cube.position.set(-1.4, 0.5, 0);
+cube.position.set(-1.5, 0.5, 0);
 const sphere = addSphere();
-sphere.position.set(1.4, 0.6, 0);
+sphere.position.set(1.5, 0.6, 0);
 
 // deseleciona pra inspector mostrar "nenhum objeto selecionado" no boot
 setSelected(null);
@@ -251,6 +254,8 @@ initApi({
   catalogGetExpandedCategories: getExpandedCategories,
   catalogShowTab: showTab,
   notifyChange: notifySceneChanged,
+  // Fase 3: anchor helper pro inspector / api re-aplicarem ao mudar 'apoio'
+  applyAnchor,
 });
 
 toast('clag carregado — arraste para orbitar · clique em objetos para selecionar', { timeout: 4500 });

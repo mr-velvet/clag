@@ -111,6 +111,36 @@ export function snapVec3(v3) {
   );
 }
 
+// snap considerando footprint do objeto (Fase 3 Sims-mode).
+//
+// Regra "tipo Sims": pra cada eixo, se a dimensao em tiles eh impar, o
+// centro snapa pra centro de tile (multiplo de gridSize). Se eh par, o
+// centro snapa pra meia-tile (multiplo deslocado de 0.5 * gridSize), pra
+// que o objeto cubra exatamente N tiles inteiros (centro entre tiles).
+//
+// Ex: footprint = [2, 1] com gridSize = 0.5 ->
+//   eixo X (par): x = (floor(x/0.5) + 0.5) * 0.5  -> 0.25, 0.75, ...
+//   eixo Z (impar): z = round(z/0.5) * 0.5         -> 0, 0.5, 1, ...
+//
+// Footprint padrao [1,1] cai exatamente em snapVec3 (compat 100%).
+export function snapVec3WithFootprint(v3, footprint) {
+  const fp = Array.isArray(footprint) && footprint.length === 2 ? footprint : [1, 1];
+  const w = Math.max(1, Math.round(fp[0]));
+  const d = Math.max(1, Math.round(fp[1]));
+  const x = snapAxisWithSize(v3.x, w, _gridSize);
+  const z = snapAxisWithSize(v3.z, d, _gridSize);
+  return new THREE.Vector3(x, v3.y, z);
+}
+
+function snapAxisWithSize(value, sizeTiles, step) {
+  if (sizeTiles % 2 === 1) {
+    // impar -> centro do tile (multiplo de step)
+    return snapTo(value, step);
+  }
+  // par -> meia-tile (offset de step/2)
+  return Math.round(value / step - 0.5) * step + step / 2;
+}
+
 // snap de angulo em radianos para multiplo de rotStep (graus)
 export function snapAngle(rad) {
   const deg = THREE.MathUtils.radToDeg(rad);
@@ -143,11 +173,11 @@ export function applySnapToObject(obj) {
 
   let changed = false;
 
-  // posicao (XZ)
-  const px = snapTo(obj.position.x, _gridSize);
-  const pz = snapTo(obj.position.z, _gridSize);
-  if (px !== obj.position.x) { obj.position.x = px; changed = true; }
-  if (pz !== obj.position.z) { obj.position.z = pz; changed = true; }
+  // posicao (XZ) — leva footprint em conta (Fase 3)
+  const fp = obj.userData?.footprint;
+  const snapped = snapVec3WithFootprint(obj.position, fp);
+  if (snapped.x !== obj.position.x) { obj.position.x = snapped.x; changed = true; }
+  if (snapped.z !== obj.position.z) { obj.position.z = snapped.z; changed = true; }
 
   // rotacao (3 eixos)
   const rx = snapAngle(obj.rotation.x);

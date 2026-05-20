@@ -137,13 +137,21 @@ export async function searchCategory(leafId) {
     return [];
   }
   if (signal.aborted) return [];
-  setLastResults(items);
-  if (items.length === 0) {
+  // decora cada item com defaults de posicionamento da folha (Fase 3).
+  // assim drop, dblclick e dropAsset via API ja herdam anchor/footprint
+  // sem que cada caminho precise lookup separado.
+  const decorated = items.map(it => ({
+    ...it,
+    anchor: leaf.anchor || 'floor',
+    footprint: Array.isArray(leaf.footprint) ? [leaf.footprint[0], leaf.footprint[1]] : [1, 1],
+  }));
+  setLastResults(decorated);
+  if (decorated.length === 0) {
     DOM.results.innerHTML = `<div class="status">nenhum asset pra "${escapeHtml(leaf.label)}". tente outra categoria.</div>`;
-    return items;
+    return decorated;
   }
-  renderResults(items);
-  return items;
+  renderResults(decorated);
+  return decorated;
 }
 
 function renderResults(items) {

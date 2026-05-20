@@ -104,8 +104,12 @@ body {
 
 /* snap toggle + config */
 .snap-group { display: flex; gap: 2px; align-items: center; position: relative; }
-.btn.snap-toggle { font-size: 12px; padding: 4px 9px; }
+/* Fix C (Fase 3): label fixo "encaixar" — estado off fica visivelmente
+   apagado (texto cinza, sem destaque) pra contraste com active (azul forte). */
+.btn.snap-toggle { font-size: 12px; padding: 4px 9px; color: var(--text-2); }
+.btn.snap-toggle:hover { color: var(--text-1); }
 .btn.snap-toggle.active { background: var(--accent-strong); border-color: var(--accent-strong); color: white; }
+.btn.snap-toggle.active:hover { color: white; }
 .btn.snap-config { padding: 4px 7px; min-width: 26px; font-size: 13px; color: var(--text-1); }
 .btn.snap-config[aria-expanded="true"] { background: var(--bg-3); border-color: var(--accent); color: var(--accent); }
 
@@ -197,6 +201,62 @@ body {
   background: var(--accent);
   border-color: var(--accent);
 }
+
+/* inspector: dropdown custom de "apoio" (Fase 3 — nunca usar <select> nativo) */
+.insp-anchor-wrap {
+  position: relative;
+  width: 100%;
+  min-width: 0;
+}
+.insp-anchor-btn {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  width: 100%;
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+  color: var(--text-0);
+  padding: 4px 8px;
+  border-radius: 3px;
+  cursor: pointer;
+  font: inherit;
+  font-size: 12px;
+  text-align: left;
+}
+.insp-anchor-btn:hover { background: var(--bg-3); }
+.insp-anchor-btn[aria-expanded="true"] { border-color: var(--accent); color: var(--accent); }
+.insp-anchor-btn .insp-anchor-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.insp-anchor-btn .caret { color: var(--text-2); font-size: 10px; flex-shrink: 0; }
+.insp-anchor-menu {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  right: 0;
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 3px;
+  z-index: 150;
+  box-shadow: 0 6px 18px rgba(0,0,0,0.4);
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.insp-anchor-menu.hidden { display: none; }
+.insp-anchor-option {
+  background: transparent;
+  border: none;
+  color: var(--text-0);
+  padding: 5px 8px;
+  border-radius: 3px;
+  cursor: pointer;
+  font: inherit;
+  font-size: 12px;
+  text-align: left;
+}
+.insp-anchor-option:hover { background: var(--bg-3); }
+.insp-anchor-option.active { background: var(--accent-strong); color: white; }
 
 /* main grid — viewport tem que sobreviver mesmo em telas pequenas */
 #main {

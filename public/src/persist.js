@@ -17,8 +17,18 @@ function serializeObj(obj) {
     scale: obj.scale.toArray(),
   };
   if (obj.userData?.assetMeta) {
-    o.assetMeta = obj.userData.assetMeta;
+    // Fase 3: garante que anchor/footprint estao no assetMeta serializado
+    // mesmo se quem populou userData esqueceu de copiar.
+    const meta = { ...obj.userData.assetMeta };
+    if (obj.userData.anchor && !meta.anchor) meta.anchor = obj.userData.anchor;
+    if (obj.userData.footprint && !meta.footprint) meta.footprint = [...obj.userData.footprint];
+    o.assetMeta = meta;
   }
+  // Fase 3: persiste anchor/footprint tambem fora de assetMeta pra que
+  // primitivas (cubo, esfera) que usam essas props possam restaurar.
+  if (obj.userData?.anchor) o.anchor = obj.userData.anchor;
+  if (Array.isArray(obj.userData?.footprint)) o.footprint = [...obj.userData.footprint];
+  if (obj.userData?.freeTransform) o.freeTransform = true;
   // primitive: persist color of the first material
   const mat = firstMat(obj);
   if (mat?.color) {
@@ -93,6 +103,7 @@ async function rehydrate(o, addPrimitive, downloadAndPlaceMeta) {
       if (o.roughness != null && 'roughness' in mat) mat.roughness = o.roughness;
       if (o.metalness != null && 'metalness' in mat) mat.metalness = o.metalness;
     }
+    applySimsMeta(obj, o);
     return;
   }
   if (o.kind === 'light:point') {
@@ -108,17 +119,29 @@ async function rehydrate(o, addPrimitive, downloadAndPlaceMeta) {
       lt.intensity = o.light.intensity;
       if ('distance' in lt) lt.distance = o.light.distance;
     }
+    applySimsMeta(obj, o);
     return;
   }
   if (o.kind === 'asset' && o.assetMeta) {
     // re-download via stored meta
     if (downloadAndPlaceMeta) {
-      await downloadAndPlaceMeta(o.assetMeta, {
+      const placed = await downloadAndPlaceMeta(o.assetMeta, {
         position: new THREE.Vector3().fromArray(o.position),
         rotation: o.rotation,
         scale: o.scale,
         name: o.name,
       });
+      // se downloadAndPlaceMeta nao colou ja, aplica meta Sims-mode
+      // localizando o objeto pelo nome (best effort).
+      if (placed && placed.userData) applySimsMeta(placed, o);
     }
   }
+}
+
+// aplica metadata Sims-mode (anchor, footprint, freeTransform) no objeto
+// recem-rehidratado, sem mexer em transform.
+function applySimsMeta(obj, saved) {
+  if (saved.anchor) obj.userData.anchor = saved.anchor;
+  if (Array.isArray(saved.footprint)) obj.userData.footprint = [...saved.footprint];
+  if (saved.freeTransform) obj.userData.freeTransform = true;
 }
