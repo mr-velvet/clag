@@ -1,11 +1,20 @@
 import * as THREE from 'three';
 import { getUserObjects, addToScene, userRoot } from './scene.js';
+import { createRoom, getRoomDimensions, isRoomPart } from './room.js';
 
 const STORAGE_KEY = 'clag:scene-v1';
 
 export function serializeScene() {
-  const objs = getUserObjects().map(serializeObj);
-  return { version: 1, objects: objs };
+  // Fase 4: sala vira campo top-level `room` no JSON (mais simples que
+  // serializar 6 mesh com kind='room:*'). Restore recria via createRoom().
+  const room = getRoomDimensions();
+  // pula objetos com kind=room:* na lista de objects — sala vem do campo room.
+  const objs = getUserObjects()
+    .filter(o => !isRoomPart(o))
+    .map(serializeObj);
+  const out = { version: 1, objects: objs };
+  if (room) out.room = room;
+  return out;
 }
 
 function serializeObj(obj) {
@@ -78,6 +87,11 @@ export async function restoreSceneFromLocal(addPrimitive, downloadAndPlaceMeta) 
   if (!data?.objects) return false;
   // we clear current userRoot to load
   while (userRoot.children.length) userRoot.remove(userRoot.children[0]);
+  // Fase 4: recria sala primeiro (se houver) — assim anchor='ceiling' /
+  // 'wall' nos assets seguintes encontra room:ceiling / room:wall reais.
+  if (data.room && Number.isFinite(data.room.width) && Number.isFinite(data.room.depth) && Number.isFinite(data.room.height)) {
+    try { createRoom(data.room); } catch (e) { console.warn('failed to restore room', data.room, e); }
+  }
   for (const o of data.objects) {
     try {
       await rehydrate(o, addPrimitive, downloadAndPlaceMeta);

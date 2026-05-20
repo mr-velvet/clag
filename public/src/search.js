@@ -257,22 +257,28 @@ async function downloadAndPlace(item, position) {
   }
 }
 
-// aplica regra de ancoragem ao objeto recem-adicionado (Fase 3 Sims-mode).
+// aplica regra de ancoragem ao objeto recem-adicionado (Fase 3 Sims-mode,
+// Fase 4 consome room:floor/wall/ceiling reais quando ha sala).
 //
-// - floor: planta o objeto no chao (base do bounding box em Y=0).
-// - ceiling: se ha `room:ceiling`, alinha Y a altura dele; sem sala, usa
+// - floor: planta o objeto no chao (base do bounding box em Y do piso).
+// - ceiling: se ha `room:ceiling`, centraliza topo do objeto no teto
+//   (centro fica em ceilingY - boxSize.y/2); sem sala, usa
 //   ROOM_HEIGHT_DEFAULT como fallback. marca anchorApplied.
-// - wall: tenta raycast da posicao de drop em direcao a cada parede
+// - wall: raycast da posicao de drop em direcao a cada parede
 //   `room:wall`; se acerta, cola na parede; sem sala, planta no chao
 //   (fallback) — marca anchorApplied='wall-fallback'.
 //
 // Helper publico — chamavel por inspector quando muda anchor depois. Fix
 // Bug 7: branches 'floor' e 'wall-fallback' agora resetam Y pro chao em
 // vez de deixar objeto flutuando (ex: depois de mudar de ceiling pra floor).
-export function applyAnchor(obj, dropPos) {
+//
+// opts.silent === true → suprime toasts de fallback (PM #3 Fase 4: toast
+// dispara so no drop inicial, nao em mudanca via inspector/API).
+export function applyAnchor(obj, dropPos, opts = {}) {
+  const silent = !!opts.silent;
   const anchor = obj?.userData?.anchor || 'floor';
   if (anchor === 'floor') {
-    // Fix Bug 7: planta base do objeto no chao (Y=0). Antes deixava Y como
+    // Fix Bug 7: planta base do objeto no chao. Antes deixava Y como
     // estava — depois de ceiling -> floor o objeto ficava flutuando.
     plantOnFloor(obj);
     obj.userData.anchorApplied = 'floor';
@@ -281,18 +287,24 @@ export function applyAnchor(obj, dropPos) {
   if (anchor === 'ceiling') {
     const ceiling = findUserChildByKind('room:ceiling');
     if (ceiling) {
-      // alinha topo do objeto na altura do teto
-      const box = new THREE.Box3().setFromObject(obj);
-      const objHeight = box.getSize(new THREE.Vector3()).y;
-      obj.position.y = ceiling.position.y - objHeight;
+      // ceilingY = face de baixo do teto. Centraliza topo do objeto no
+      // teto: centro fica em ceilingY - boxSize.y/2 (Obs 12 QA). Antes
+      // colocava Y = ceilingY - boxSize.y, o que deixava o centro abaixo
+      // do esperado pra luminarias com altura significativa.
+      const box = new THREE.Box3().setFromObject(ceiling);
+      const ceilingY = box.min.y; // face inferior do teto
+      const objBox = new THREE.Box3().setFromObject(obj);
+      const objHeight = objBox.getSize(new THREE.Vector3()).y;
+      obj.position.y = ceilingY - objHeight / 2;
       obj.userData.anchorApplied = 'ceiling';
     } else {
       // fallback: teto padrao 2.7m. objeto "pendura" do teto fictício.
-      const box = new THREE.Box3().setFromObject(obj);
-      const objHeight = box.getSize(new THREE.Vector3()).y;
-      obj.position.y = ROOM_HEIGHT_DEFAULT - objHeight;
+      // Mesma matematica: topo do objeto encosta no teto virtual.
+      const objBox = new THREE.Box3().setFromObject(obj);
+      const objHeight = objBox.getSize(new THREE.Vector3()).y;
+      obj.position.y = ROOM_HEIGHT_DEFAULT - objHeight / 2;
       obj.userData.anchorApplied = 'ceiling-fallback';
-      toast('sem sala — luz pendurada no teto virtual (2.7m)', { kind: 'warn' });
+      if (!silent) toast('sem sala — luz pendurada no teto virtual (2.7m)', { kind: 'warn' });
     }
     return;
   }
@@ -302,7 +314,7 @@ export function applyAnchor(obj, dropPos) {
       // Fix Bug 7: sem sala, planta objeto no chao (antes deixava Y solto).
       plantOnFloor(obj);
       obj.userData.anchorApplied = 'wall-fallback';
-      toast('sem parede — objeto posicionado no chão', { kind: 'warn' });
+      if (!silent) toast('sem parede — objeto posicionado no chão', { kind: 'warn' });
       return;
     }
     // raycast horizontal a partir do drop em direcao a cada parede.
@@ -338,7 +350,7 @@ export function applyAnchor(obj, dropPos) {
       // Fix Bug 7: raycast nao acertou nenhuma parede — planta no chao.
       plantOnFloor(obj);
       obj.userData.anchorApplied = 'wall-fallback';
-      toast('sem parede — objeto posicionado no chão', { kind: 'warn' });
+      if (!silent) toast('sem parede — objeto posicionado no chão', { kind: 'warn' });
     }
     return;
   }

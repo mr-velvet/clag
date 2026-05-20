@@ -19,6 +19,7 @@ import { loadModelFromUrl } from './loader.js';
 import { providerMap } from './providers/index.js';
 import { addToScene } from './scene.js';
 import { initApi } from './api.js';
+import { createRoom, removeRoom, getRoomDimensions, hasRoom } from './room.js';
 import * as THREE from 'three';
 
 const $ = id => document.getElementById(id);
@@ -52,6 +53,7 @@ $('btn-add-cube').addEventListener('click', addCube);
 $('btn-add-sphere').addEventListener('click', addSphere);
 $('btn-add-plane').addEventListener('click', addPlane);
 $('btn-add-light').addEventListener('click', addPointLight);
+$('btn-add-room').addEventListener('click', () => openRoomModal());
 $('btn-delete').addEventListener('click', () => {
   const s = getSelected();
   if (s) removeFromScene(s);
@@ -192,8 +194,8 @@ async function downloadAndPlaceFromMeta(meta, transform) {
   const obj = await loadModelFromUrl(url, ext || meta.format);
   obj.userData.kind = 'asset';
   obj.userData.assetMeta = meta;
-  // Fix Bug 8: propaga anchor/footprint do meta pro topo do userData pra que
-  // applySimsMeta + snap/inspector consigam ler sem cavar dentro de assetMeta.
+  // fallback retro-compat: saves anteriores à Fase 3 não têm anchor/footprint
+  // no top-level mas têm em assetMeta — copia daqui pra userData garantir.
   if (meta.anchor) obj.userData.anchor = meta.anchor;
   if (Array.isArray(meta.footprint)) {
     obj.userData.footprint = [meta.footprint[0], meta.footprint[1]];
@@ -208,6 +210,92 @@ async function downloadAndPlaceFromMeta(meta, transform) {
   // chamar applySimsMeta(obj, savedObj) e restaurar anchor/footprint/freeTransform
   // do save. Antes retornava undefined -> applySimsMeta nunca rodava.
   return obj;
+}
+
+// modal custom "Nova Sala" (Fase 4) — substitui prompt(). Defaults 6×5×2.7m.
+// Reabre sempre limpo. Esc fecha. Click fora do card tambem fecha.
+let _roomModal = null;
+function buildRoomModal() {
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-overlay hidden';
+  overlay.innerHTML = `
+    <div class="modal-card" role="dialog" aria-labelledby="room-modal-title">
+      <div class="modal-title" id="room-modal-title">nova sala</div>
+      <div class="modal-subtitle">paredes, piso e teto serão criados ao redor da origem. já existir uma sala, ela é substituída.</div>
+      <div class="modal-row">
+        <label for="room-w-input">largura (m)</label>
+        <input id="room-w-input" type="number" min="1" max="50" step="0.1" value="6" />
+      </div>
+      <div class="modal-row">
+        <label for="room-d-input">profundidade (m)</label>
+        <input id="room-d-input" type="number" min="1" max="50" step="0.1" value="5" />
+      </div>
+      <div class="modal-row">
+        <label for="room-h-input">altura (m)</label>
+        <input id="room-h-input" type="number" min="1.5" max="20" step="0.1" value="2.7" />
+      </div>
+      <div class="modal-actions">
+        <button id="room-modal-cancel" class="btn" data-clag-action="room-modal-cancel">cancelar</button>
+        <button id="room-modal-create" class="btn primary" data-clag-action="room-modal-create">criar</button>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(overlay);
+  const wInput = overlay.querySelector('#room-w-input');
+  const dInput = overlay.querySelector('#room-d-input');
+  const hInput = overlay.querySelector('#room-h-input');
+  const cancelBtn = overlay.querySelector('#room-modal-cancel');
+  const createBtn = overlay.querySelector('#room-modal-create');
+
+  function commit() {
+    const w = parseFloat(wInput.value);
+    const d = parseFloat(dInput.value);
+    const h = parseFloat(hInput.value);
+    if (!Number.isFinite(w) || w <= 0 ||
+        !Number.isFinite(d) || d <= 0 ||
+        !Number.isFinite(h) || h <= 0) {
+      toast('dimensões inválidas — use números positivos', { kind: 'warn' });
+      return;
+    }
+    try {
+      createRoom({ width: w, depth: d, height: h });
+      toast(`sala criada (${w}×${d}×${h}m)`, { kind: 'success' });
+      closeRoomModal();
+    } catch (e) {
+      toast(`falha ao criar sala: ${e.message}`, { kind: 'error' });
+    }
+  }
+  cancelBtn.addEventListener('click', closeRoomModal);
+  createBtn.addEventListener('click', commit);
+  // Enter em qualquer input confirma; Esc cancela
+  overlay.addEventListener('keydown', ev => {
+    if (ev.key === 'Enter') { ev.preventDefault(); commit(); }
+    if (ev.key === 'Escape') { ev.preventDefault(); closeRoomModal(); }
+  });
+  overlay.addEventListener('click', ev => {
+    if (ev.target === overlay) closeRoomModal();
+  });
+  return { overlay, wInput, dInput, hInput };
+}
+function openRoomModal() {
+  if (!_roomModal) _roomModal = buildRoomModal();
+  // pre-preenche com dimensoes atuais se ja ha sala (facilita "editar")
+  const cur = getRoomDimensions();
+  if (cur) {
+    _roomModal.wInput.value = cur.width;
+    _roomModal.dInput.value = cur.depth;
+    _roomModal.hInput.value = cur.height;
+  } else {
+    _roomModal.wInput.value = 6;
+    _roomModal.dInput.value = 5;
+    _roomModal.hInput.value = 2.7;
+  }
+  _roomModal.overlay.classList.remove('hidden');
+  // foco no primeiro input pra Enter confirmar direto
+  setTimeout(() => _roomModal.wInput.focus(), 0);
+}
+function closeRoomModal() {
+  if (_roomModal) _roomModal.overlay.classList.add('hidden');
 }
 
 // HUD stats
@@ -266,6 +354,12 @@ initApi({
   notifyChange: notifySceneChanged,
   // Fase 3: anchor helper pro inspector / api re-aplicarem ao mudar 'apoio'
   applyAnchor,
+  // Fase 4: modo sala
+  createRoom,
+  removeRoom,
+  getRoomDimensions,
+  hasRoom,
+  openRoomModal,
 });
 
 toast('clag carregado — arraste para orbitar · clique em objetos para selecionar', { timeout: 4500 });

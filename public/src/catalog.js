@@ -46,6 +46,7 @@ export const tree = [
       { id: 'cabinet', label: 'Armário', query: 'cabinet', anchor: 'wall', footprint: [2, 1] },
       { id: 'microwave', label: 'Microondas', query: 'microwave', anchor: 'floor', footprint: [1, 1] },
       { id: 'mug', label: 'Caneca', query: 'mug', anchor: 'floor', footprint: [1, 1] },
+      { id: 'kitchen-pendant', label: 'Luminária Pendente', query: 'pendant lamp', anchor: 'ceiling', footprint: [1, 1] },
     ],
   },
   {

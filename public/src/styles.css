@@ -104,12 +104,13 @@ body {
 
 /* snap toggle + config */
 .snap-group { display: flex; gap: 2px; align-items: center; position: relative; }
-/* Fix C (Fase 3): label fixo "encaixar" — estado off fica visivelmente
-   apagado mas legivel (entre text-1 e text-2), pra nao parecer desabilitado.
-   PM ressalva #3: text-2 puro deixava parecendo "morto". */
-.btn.snap-toggle { font-size: 12px; padding: 4px 9px; color: var(--text-1); opacity: 0.85; }
+/* Fix C (Fase 3) + Fase 4: label fixo "encaixar" — estado off fica
+   visivelmente apagado mas legivel. Fase 4 reforca contraste com borda
+   tracejada acentuada (PM #5: dar definicao alem da cor/opacidade). */
+.btn.snap-toggle { font-size: 12px; padding: 4px 9px; color: var(--text-1); opacity: 0.85; border: 1px solid var(--border); }
+.btn.snap-toggle:not(.active) { border-style: dashed; border-color: var(--text-2); }
 .btn.snap-toggle:hover { color: var(--text-0); opacity: 1; }
-.btn.snap-toggle.active { background: var(--accent-strong); border-color: var(--accent-strong); color: white; opacity: 1; }
+.btn.snap-toggle.active { background: var(--accent-strong); border-color: var(--accent-strong); border-style: solid; color: white; opacity: 1; }
 .btn.snap-toggle.active:hover { color: white; }
 .btn.snap-config { padding: 4px 7px; min-width: 26px; font-size: 13px; color: var(--text-1); }
 .btn.snap-config[aria-expanded="true"] { background: var(--bg-3); border-color: var(--accent); color: var(--accent); }
@@ -832,6 +833,86 @@ body {
 @keyframes toastIn {
   from { transform: translateX(20px); opacity: 0; }
   to { transform: translateX(0); opacity: 1; }
+}
+
+/* modal custom (Fase 4: Nova Sala) — nunca usar prompt()/confirm() */
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(8, 10, 14, 0.65);
+  backdrop-filter: blur(2px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 500;
+  animation: modalFade 0.14s ease-out;
+}
+.modal-overlay.hidden { display: none; }
+.modal-card {
+  background: var(--bg-1);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 20px 24px;
+  min-width: 320px;
+  max-width: 420px;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.6);
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.modal-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-0);
+  letter-spacing: 0.3px;
+}
+.modal-subtitle {
+  font-size: 11.5px;
+  color: var(--text-2);
+  line-height: 1.4;
+  margin-top: -8px;
+}
+.modal-row {
+  display: grid;
+  grid-template-columns: 1fr 90px;
+  gap: 10px;
+  align-items: center;
+}
+.modal-row label {
+  font-size: 12px;
+  color: var(--text-1);
+}
+.modal-row input[type=number] {
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+  color: var(--text-0);
+  padding: 5px 8px;
+  font: 12px ui-monospace, Menlo, monospace;
+  border-radius: 3px;
+  width: 100%;
+}
+.modal-row input[type=number]:focus { outline: none; border-color: var(--accent); }
+.modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 6px;
+}
+@keyframes modalFade {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+/* inspector: aviso textual sutil pra anchor fallback (PM #3) */
+.insp-anchor-warning {
+  font-size: 11px;
+  color: var(--warn);
+  line-height: 1.4;
+  margin-top: 6px;
+  padding: 4px 8px;
+  background: rgba(226, 179, 90, 0.08);
+  border-left: 2px solid var(--warn);
+  border-radius: 2px;
 }
 
 /* drag overlay */

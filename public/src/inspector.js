@@ -2,11 +2,31 @@ import * as THREE from 'three';
 import { on, getSelected, notifySceneChanged } from './scene.js';
 import * as snap from './snap.js';
 import { applyAnchor } from './search.js';
+import { isRoomPart, describeRoomPart } from './room.js';
 
 const ANCHOR_LABELS = {
   floor: 'Chão',
   wall: 'Parede',
   ceiling: 'Teto',
+};
+
+// PM #1 (Fase 4): labels internos do inspector em PT-BR pra eliminar a
+// mistura "secao PT + linha EN" que vinha como debito desde Fase 3.
+const ROW_LABELS = {
+  name: 'nome',
+  type: 'tipo',
+  source: 'origem',
+  license: 'licença',
+  view: 'ver',
+  color: 'cor',
+  rough: 'rugosidade',
+  metal: 'metal',
+  emissive: 'emissivo',
+  intens: 'intens.',
+  dist: 'dist.',
+  verts: 'vértices',
+  tris: 'triângulos',
+  meshes: 'meshes',
 };
 
 let root;
@@ -35,38 +55,50 @@ function render() {
   }
   root.innerHTML = '';
 
+  const roomPart = isRoomPart(obj);
+
   // -- identity section
   const idSec = section('identidade');
-  const nameRow = row('name');
-  const nameIn = document.createElement('input');
-  nameIn.type = 'text';
-  nameIn.className = 'insp-name-input';
-  nameIn.value = obj.name || '';
-  nameIn.addEventListener('input', () => { obj.name = nameIn.value; notifySceneChanged(); });
-  nameRow.appendChild(nameIn);
-  idSec.appendChild(nameRow);
-  idSec.appendChild(plainRow('type', obj.userData.kind || obj.type || '—'));
-  if (obj.userData.assetMeta) {
-    const m = obj.userData.assetMeta;
-    idSec.appendChild(plainRow('source', m.source || '—'));
-    if (m.license) idSec.appendChild(plainRow('license', m.license));
-    if (m.url) idSec.appendChild(linkRow('view', m.url, m.url));
+  if (roomPart) {
+    // Fase 4: paredes/piso/teto sao identidade fixa — mostra label PT-BR
+    // e nao deixa user renomear (poderia quebrar o snap pelo kind).
+    idSec.appendChild(plainRow(ROW_LABELS.name, describeRoomPart(obj) || obj.name || '—'));
+    idSec.appendChild(plainRow(ROW_LABELS.type, 'sala'));
+  } else {
+    const nameRow = row(ROW_LABELS.name);
+    const nameIn = document.createElement('input');
+    nameIn.type = 'text';
+    nameIn.className = 'insp-name-input';
+    nameIn.value = obj.name || '';
+    nameIn.addEventListener('input', () => { obj.name = nameIn.value; notifySceneChanged(); });
+    nameRow.appendChild(nameIn);
+    idSec.appendChild(nameRow);
+    idSec.appendChild(plainRow(ROW_LABELS.type, obj.userData.kind || obj.type || '—'));
+    if (obj.userData.assetMeta) {
+      const m = obj.userData.assetMeta;
+      idSec.appendChild(plainRow(ROW_LABELS.source, m.source || '—'));
+      if (m.license) idSec.appendChild(plainRow(ROW_LABELS.license, m.license));
+      if (m.url) idSec.appendChild(linkRow(ROW_LABELS.view, m.url, m.url));
+    }
   }
   root.appendChild(idSec);
 
-  // -- transform section
-  const tSec = section('posição');
-  // toggle "posicionamento livre" — desliga snap so neste objeto (Fase 2 Sims-mode)
-  tSec.appendChild(freeTransformToggle(obj));
-  tSec.appendChild(vec3Row('posição', obj.position, 0.01, () => notifySceneChanged()));
-  tSec.appendChild(vec3RowEuler('rotação', obj.rotation, () => notifySceneChanged()));
-  tSec.appendChild(vec3Row('escala', obj.scale, 0.01, () => notifySceneChanged()));
-  root.appendChild(tSec);
+  // -- transform + posicionamento (Fases 2-3): esconde pra room:* — paredes
+  // nao se editam individualmente. Pra mover/redimensionar sala, recriar.
+  if (!roomPart) {
+    // -- transform section
+    const tSec = section('posição');
+    // toggle "posicionamento livre" — desliga snap so neste objeto (Fase 2 Sims-mode)
+    tSec.appendChild(freeTransformToggle(obj));
+    tSec.appendChild(vec3Row('posição', obj.position, 0.01, () => notifySceneChanged()));
+    tSec.appendChild(vec3RowEuler('rotação', obj.rotation, () => notifySceneChanged()));
+    tSec.appendChild(vec3Row('escala', obj.scale, 0.01, () => notifySceneChanged()));
+    root.appendChild(tSec);
 
-  // -- posicionamento section (Fase 3 Sims-mode): footprint + apoio
-  // so faz sentido pra assets / primitivas — nao expor pra room:* etc.
-  // (room sera Fase 4; ate la mostra tudo, nao bloqueia leigo).
-  root.appendChild(positioningSection(obj));
+    // -- posicionamento section (Fase 3): footprint + apoio + warning
+    // de fallback (Fase 4 PM #3). So faz sentido pra assets / primitivas.
+    root.appendChild(positioningSection(obj));
+  }
 
   // -- material section (if the object has at least one mesh with a material)
   const matInfo = firstMaterial(obj);
@@ -74,7 +106,7 @@ function render() {
     const mSec = section('material');
     const mat = matInfo.material;
     if (mat.color) {
-      const r = row('color');
+      const r = row(ROW_LABELS.color);
       const wrap = document.createElement('div');
       wrap.className = 'insp-color-row';
       const c = document.createElement('input');
@@ -96,19 +128,19 @@ function render() {
       mSec.appendChild(r);
     }
     if ('roughness' in mat) {
-      mSec.appendChild(sliderRow('rough.', mat.roughness, 0, 1, 0.01, v => {
+      mSec.appendChild(sliderRow(ROW_LABELS.rough, mat.roughness, 0, 1, 0.01, v => {
         for (const m of matInfo.materials) m.roughness = v;
         notifySceneChanged();
       }));
     }
     if ('metalness' in mat) {
-      mSec.appendChild(sliderRow('metal.', mat.metalness, 0, 1, 0.01, v => {
+      mSec.appendChild(sliderRow(ROW_LABELS.metal, mat.metalness, 0, 1, 0.01, v => {
         for (const m of matInfo.materials) m.metalness = v;
         notifySceneChanged();
       }));
     }
     if ('emissive' in mat && mat.emissive) {
-      const r = row('emissive');
+      const r = row(ROW_LABELS.emissive);
       const wrap = document.createElement('div');
       wrap.className = 'insp-color-row';
       const c = document.createElement('input');
@@ -129,7 +161,7 @@ function render() {
   const light = firstLight(obj);
   if (light) {
     const lSec = section('luz');
-    const r = row('color');
+    const r = row(ROW_LABELS.color);
     const wrap = document.createElement('div');
     wrap.className = 'insp-color-row';
     const c = document.createElement('input');
@@ -140,10 +172,10 @@ function render() {
     r.appendChild(wrap);
     lSec.appendChild(r);
     if ('intensity' in light) {
-      lSec.appendChild(sliderRow('intens.', light.intensity, 0, 30, 0.1, v => { light.intensity = v; notifySceneChanged(); }));
+      lSec.appendChild(sliderRow(ROW_LABELS.intens, light.intensity, 0, 30, 0.1, v => { light.intensity = v; notifySceneChanged(); }));
     }
     if ('distance' in light) {
-      lSec.appendChild(sliderRow('dist.', light.distance, 0, 100, 0.1, v => { light.distance = v; notifySceneChanged(); }));
+      lSec.appendChild(sliderRow(ROW_LABELS.dist, light.distance, 0, 100, 0.1, v => { light.distance = v; notifySceneChanged(); }));
     }
     root.appendChild(lSec);
   }
@@ -152,9 +184,9 @@ function render() {
   const stats = gatherStats(obj);
   if (stats) {
     const iSec = section('informações');
-    iSec.appendChild(plainRow('verts', String(stats.verts)));
-    iSec.appendChild(plainRow('tris', String(stats.tris)));
-    iSec.appendChild(plainRow('meshes', String(stats.meshes)));
+    iSec.appendChild(plainRow(ROW_LABELS.verts, String(stats.verts)));
+    iSec.appendChild(plainRow(ROW_LABELS.tris, String(stats.tris)));
+    iSec.appendChild(plainRow(ROW_LABELS.meshes, String(stats.meshes)));
     root.appendChild(iSec);
   }
 }
@@ -234,6 +266,8 @@ function freeTransformToggle(obj) {
 }
 
 // Fase 3: secao "Posicionamento" — tamanho na grade (footprint) + apoio (anchor).
+// Fase 4 (PM #3): aviso textual sutil quando anchor caiu pra fallback
+// (sem sala). Substitui o toast repetido a cada troca pelo dropdown.
 function positioningSection(obj) {
   const s = section('posicionamento');
 
@@ -257,6 +291,18 @@ function positioningSection(obj) {
   const anRow = row('apoio');
   anRow.appendChild(anchorDropdown(obj, anchor));
   s.appendChild(anRow);
+
+  // Fase 4 PM #3: aviso textual sutil pra fallback de sala. Inspector mostra
+  // o motivo sem disparar toast a cada re-aplicacao (toast so no drop).
+  const applied = obj.userData.anchorApplied;
+  if (applied === 'ceiling-fallback' || applied === 'wall-fallback') {
+    const warn = document.createElement('div');
+    warn.className = 'insp-anchor-warning';
+    warn.textContent = applied === 'ceiling-fallback'
+      ? 'sem sala — pendurado em altura padrão (2.7m)'
+      : 'sem parede — posicionado no chão';
+    s.appendChild(warn);
+  }
 
   return s;
 }
@@ -328,8 +374,9 @@ function anchorDropdown(obj, current) {
       if (obj.userData.assetMeta) obj.userData.assetMeta.anchor = id;
       // re-aplica anchor (re-posiciona Y). drop original era na posicao
       // atual XZ; usamos a posicao XZ atual como referencia de "drop".
+      // Fase 4 (PM #3): silent=true suprime toast — aviso fica no inspector.
       const ref = obj.position.clone();
-      applyAnchor(obj, ref);
+      applyAnchor(obj, ref, { silent: true });
       snap.applySnapToObject(obj);
       closeMenu();
       notifySceneChanged();

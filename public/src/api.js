@@ -187,6 +187,8 @@ const actions = {
   },
 
   // Fase 3: anchor editavel via API. floor | wall | ceiling.
+  // Fase 4 (PM #3): silent=true por default — chamada programatica nao
+  // dispara toast a cada mudanca. UI/inspector tambem usam silent.
   setObjectAnchor(sceneId, anchor) {
     const obj = getUserObjects().find(o => o.userData?.sceneId === sceneId);
     if (!obj) throw new Error(`objeto nao encontrado: ${sceneId}`);
@@ -196,10 +198,34 @@ const actions = {
     obj.userData.anchor = anchor;
     if (obj.userData.assetMeta) obj.userData.assetMeta.anchor = anchor;
     const d = ensureDeps();
-    if (d.applyAnchor) d.applyAnchor(obj, obj.position.clone());
+    if (d.applyAnchor) d.applyAnchor(obj, obj.position.clone(), { silent: true });
     snap.applySnapToObject(obj);
     notifySceneChanged();
     return { sceneId, anchor };
+  },
+
+  // Fase 4: modo Sala. namespace 'room' coerente com 'catalog'.
+  room: {
+    create({ width = 6, depth = 5, height = 2.7 } = {}) {
+      const d = ensureDeps();
+      return d.createRoom({ width, depth, height });
+    },
+    remove() {
+      const d = ensureDeps();
+      return d.removeRoom();
+    },
+    openModal() {
+      const d = ensureDeps();
+      return d.openRoomModal();
+    },
+    dimensions() {
+      const d = ensureDeps();
+      return d.getRoomDimensions();
+    },
+    has() {
+      const d = ensureDeps();
+      return d.hasRoom();
+    },
   },
 
   // catalogo (Fase 1)
@@ -277,6 +303,22 @@ const state = {
     const obj = getUserObjects().find(o => o.userData?.sceneId === sceneId);
     if (!obj) return null;
     return obj.userData?.anchor || 'floor';
+  },
+  // Fase 4 (Obs 13 QA): expoe se anchor real foi aplicado ou caiu pra fallback.
+  // Retorna 'ceiling' | 'ceiling-fallback' | 'wall' | 'wall-fallback' | 'floor' | null.
+  objectAnchorApplied(sceneId) {
+    const obj = getUserObjects().find(o => o.userData?.sceneId === sceneId);
+    if (!obj) return null;
+    return obj.userData?.anchorApplied || null;
+  },
+  // Fase 4: estado da sala atual.
+  hasRoom() {
+    const d = ensureDeps();
+    return d.hasRoom();
+  },
+  roomDimensions() {
+    const d = ensureDeps();
+    return d.getRoomDimensions();
   },
   isPanelOpen(side) {
     const el = document.getElementById('app');
