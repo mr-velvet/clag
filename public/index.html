@@ -22,28 +22,28 @@
       <div class="topbar-row brand-row">
         <div class="brand">clag <span class="muted">— collage 3d engine</span></div>
         <div class="topbar-side-buttons">
-          <button id="toggle-left" class="btn icon-btn" title="toggle hierarchy">☰</button>
-          <button id="toggle-right" class="btn icon-btn" title="toggle inspector">▤</button>
+          <button id="toggle-left" class="btn icon-btn" title="toggle hierarchy" data-clag-action="toggle-left-panel">☰</button>
+          <button id="toggle-right" class="btn icon-btn" title="toggle inspector" data-clag-action="toggle-right-panel">▤</button>
         </div>
       </div>
       <div class="topbar-row actions-row">
         <div class="topbar-actions">
-          <button id="btn-add-cube" class="btn">+ cube</button>
-          <button id="btn-add-sphere" class="btn">+ sphere</button>
-          <button id="btn-add-plane" class="btn">+ plane</button>
-          <button id="btn-add-light" class="btn">+ light</button>
+          <button id="btn-add-cube" class="btn" data-clag-action="add-cube">+ cube</button>
+          <button id="btn-add-sphere" class="btn" data-clag-action="add-sphere">+ sphere</button>
+          <button id="btn-add-plane" class="btn" data-clag-action="add-plane">+ plane</button>
+          <button id="btn-add-light" class="btn" data-clag-action="add-light">+ light</button>
           <span class="sep"></span>
           <div class="mode-group" role="group" aria-label="transform mode">
-            <button id="mode-translate" class="btn mode active" title="translate (W)">⇄</button>
-            <button id="mode-rotate" class="btn mode" title="rotate (E)">↻</button>
-            <button id="mode-scale" class="btn mode" title="scale (R)">⤧</button>
+            <button id="mode-translate" class="btn mode active" title="translate (W)" data-clag-action="gizmo-translate">⇄</button>
+            <button id="mode-rotate" class="btn mode" title="rotate (E)" data-clag-action="gizmo-rotate">↻</button>
+            <button id="mode-scale" class="btn mode" title="scale (R)" data-clag-action="gizmo-scale">⤧</button>
           </div>
           <span class="sep"></span>
-          <button id="btn-delete" class="btn danger" title="delete selected (Del)">delete</button>
-          <button id="btn-duplicate" class="btn" title="duplicate (Ctrl+D)">duplicate</button>
+          <button id="btn-delete" class="btn danger" title="delete selected (Del)" data-clag-action="delete-selected">delete</button>
+          <button id="btn-duplicate" class="btn" title="duplicate (Ctrl+D)" data-clag-action="duplicate-selected">duplicate</button>
           <span class="sep"></span>
-          <button id="btn-save" class="btn" title="save scene">save</button>
-          <button id="btn-load" class="btn" title="load scene">load</button>
+          <button id="btn-save" class="btn" title="save scene" data-clag-action="save">save</button>
+          <button id="btn-load" class="btn" title="load scene" data-clag-action="load">load</button>
         </div>
       </div>
     </header>
@@ -81,12 +81,12 @@
         <span id="bottom-hint" class="bottom-hint">drag a result onto the viewport · or double-click</span>
       </div>
       <div class="search-bar">
-        <input id="search-input" type="text" placeholder="search 3d assets… (e.g. tree, rock, chair)" autocomplete="off" />
+        <input id="search-input" type="text" placeholder="search 3d assets… (e.g. tree, rock, chair)" autocomplete="off" data-clag-action="search-input" />
         <div class="select-wrap">
-          <button id="provider-btn" class="select-btn"><span id="provider-label">all providers</span> <span class="caret">▾</span></button>
+          <button id="provider-btn" class="select-btn" data-clag-action="provider-menu-toggle"><span id="provider-label">all providers</span> <span class="caret">▾</span></button>
           <div id="provider-menu" class="select-menu hidden"></div>
         </div>
-        <button id="search-btn" class="btn primary">search</button>
+        <button id="search-btn" class="btn primary" data-clag-action="search-run">search</button>
       </div>
       <div id="results" class="results">
         <div class="hint">type a query and press <kbd>Enter</kbd>. drag a result onto the viewport to add it to the scene.</div>

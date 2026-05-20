@@ -7,6 +7,11 @@ let activeProviderId = 'all';
 let lastResults = [];
 let currentSearchAbort = null;
 
+// expoe pra api.js / agentes consumirem os mesmos results que a UI ve
+export function getLastResults() { return lastResults; }
+export function setLastResults(items) { lastResults = items; }
+export { downloadAndPlace };
+
 const DOM = {
   input: null,
   btn: null,

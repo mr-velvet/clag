@@ -5,12 +5,13 @@ import {
 import { addCube, addSphere, addPlane, addPointLight } from './primitives.js';
 import { initOutliner } from './outliner.js';
 import { initInspector } from './inspector.js';
-import { initSearch } from './search.js';
+import { initSearch, getLastResults, setLastResults, downloadAndPlace } from './search.js';
 import { initToast, toast } from './toast.js';
 import { saveSceneToLocal, restoreSceneFromLocal } from './persist.js';
 import { loadModelFromUrl } from './loader.js';
 import { providerMap } from './providers/index.js';
 import { addToScene } from './scene.js';
+import { initApi } from './api.js';
 import * as THREE from 'three';
 
 const $ = id => document.getElementById(id);
@@ -135,5 +136,15 @@ sphere.position.set(1.4, 0.6, 0);
 
 // deseleciona pra inspector mostrar "no object selected" no boot
 setSelected(null);
+
+// expoe api programatica (window.clag) — Fase 0 Sims-mode
+initApi({
+  addPrimitiveByKind,
+  downloadAndPlace,
+  getLastResults,
+  setLastResults,
+  save: () => saveSceneToLocal(),
+  load: async () => await restoreSceneFromLocal(addPrimitiveByKind, downloadAndPlaceFromMeta),
+});
 
 toast('clag loaded — drag to orbit · click objects to select', { timeout: 4500 });
