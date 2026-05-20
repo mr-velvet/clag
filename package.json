@@ -1,0 +1,18 @@
+{
+  "name": "clag",
+  "version": "0.1.0",
+  "description": "Collage 3D engine — browser IDE with multi-provider asset search",
+  "private": true,
+  "type": "commonjs",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node server.js"
+  },
+  "dependencies": {
+    "express": "^4.21.0"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

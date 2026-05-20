@@ -1,0 +1,6 @@
+{
+  "name": "clag",
+  "port": 5045,
+  "database": false,
+  "logto": false
+}
