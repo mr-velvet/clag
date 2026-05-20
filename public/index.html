@@ -77,19 +77,30 @@
 
     <section id="bottom-panel" class="panel">
       <div class="panel-header">
-        <span>asset browser</span>
+        <div class="asset-tabs" role="tablist">
+          <button id="tab-search" class="asset-tab active" data-clag-action="tab-search" role="tab" aria-selected="true">buscar</button>
+          <button id="tab-catalog" class="asset-tab" data-clag-action="tab-catalog" role="tab" aria-selected="false">catálogo</button>
+        </div>
         <span id="bottom-hint" class="bottom-hint">drag a result onto the viewport · or double-click</span>
       </div>
-      <div class="search-bar">
-        <input id="search-input" type="text" placeholder="search 3d assets… (e.g. tree, rock, chair)" autocomplete="off" data-clag-action="search-input" />
-        <div class="select-wrap">
-          <button id="provider-btn" class="select-btn" data-clag-action="provider-menu-toggle"><span id="provider-label">all providers</span> <span class="caret">▾</span></button>
-          <div id="provider-menu" class="select-menu hidden"></div>
+      <div id="search-pane" class="asset-pane">
+        <div class="search-bar">
+          <input id="search-input" type="text" placeholder="search 3d assets… (e.g. tree, rock, chair)" autocomplete="off" data-clag-action="search-input" />
+          <div class="select-wrap">
+            <button id="provider-btn" class="select-btn" data-clag-action="provider-menu-toggle"><span id="provider-label">all providers</span> <span class="caret">▾</span></button>
+            <div id="provider-menu" class="select-menu hidden"></div>
+          </div>
+          <button id="search-btn" class="btn primary" data-clag-action="search-run">search</button>
         </div>
-        <button id="search-btn" class="btn primary" data-clag-action="search-run">search</button>
+        <div id="results" class="results">
+          <div class="hint">type a query and press <kbd>Enter</kbd>. drag a result onto the viewport to add it to the scene.</div>
+        </div>
       </div>
-      <div id="results" class="results">
-        <div class="hint">type a query and press <kbd>Enter</kbd>. drag a result onto the viewport to add it to the scene.</div>
+      <div id="catalog-pane" class="asset-pane hidden">
+        <div id="catalog-tree" class="catalog-tree"></div>
+        <div id="catalog-results" class="results">
+          <div class="hint">escolha uma categoria à esquerda pra ver assets sugeridos.</div>
+        </div>
       </div>
     </section>
   </div>

@@ -144,6 +144,11 @@ body {
   flex-shrink: 0;
   white-space: nowrap;
 }
+#bottom-panel > .panel-header {
+  padding: 4px 12px 0 12px;
+  background: var(--bg-2);
+  align-items: flex-end;
+}
 .bottom-hint {
   text-transform: none;
   letter-spacing: normal;
@@ -332,12 +337,129 @@ body {
   min-width: 0;
 }
 
-/* bottom panel (asset browser) — header em uma linha, search em outra linha, results em terceira */
+/* bottom panel (asset browser) — header (tabs) + pane ativo (cada pane controla seu layout) */
 #bottom-panel {
   border-top: 1px solid var(--border);
   display: grid;
-  grid-template-rows: auto auto 1fr;
+  grid-template-rows: auto 1fr;
   min-width: 0;
+}
+.asset-pane {
+  display: grid;
+  grid-template-rows: auto 1fr;
+  min-height: 0;
+  min-width: 0;
+  overflow: hidden;
+}
+.asset-pane.hidden { display: none; }
+#catalog-pane {
+  display: grid;
+  grid-template-columns: 200px 1fr;
+  grid-template-rows: 1fr;
+  min-height: 0;
+}
+#catalog-pane.hidden { display: none; }
+
+/* tabs no header do asset browser */
+.asset-tabs {
+  display: flex;
+  gap: 2px;
+  text-transform: none;
+  letter-spacing: normal;
+}
+.asset-tab {
+  background: transparent;
+  border: 1px solid transparent;
+  border-bottom: none;
+  color: var(--text-2);
+  padding: 4px 12px;
+  border-radius: 4px 4px 0 0;
+  cursor: pointer;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  transition: color 0.12s, background 0.12s;
+  position: relative;
+  top: 1px;
+}
+.asset-tab:hover { color: var(--text-0); background: var(--bg-3); }
+.asset-tab.active {
+  color: var(--accent);
+  border-color: var(--border);
+  border-bottom-color: var(--bg-1);
+  background: var(--bg-1);
+}
+
+/* catalogo: arvore */
+.catalog-tree {
+  background: var(--bg-1);
+  border-right: 1px solid var(--border);
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: 6px 0;
+  min-height: 0;
+}
+.catalog-cat { display: flex; flex-direction: column; }
+.catalog-cat-header {
+  background: transparent;
+  border: none;
+  color: var(--text-0);
+  padding: 6px 10px;
+  cursor: pointer;
+  font: inherit;
+  font-size: 12.5px;
+  display: grid;
+  grid-template-columns: 12px 18px 1fr auto;
+  gap: 6px;
+  align-items: center;
+  text-align: left;
+  width: 100%;
+  border-radius: 0;
+  transition: background 0.1s;
+}
+.catalog-cat-header:hover { background: var(--bg-2); }
+.catalog-cat-header.expanded { color: var(--accent); }
+.catalog-cat-header .cat-chevron {
+  font-size: 9px;
+  color: var(--text-2);
+  text-align: center;
+}
+.catalog-cat-header .cat-icon { font-size: 14px; }
+.catalog-cat-header .cat-count {
+  font-size: 10px;
+  color: var(--text-2);
+  background: var(--bg-3);
+  padding: 0 5px;
+  border-radius: 8px;
+  min-width: 18px;
+  text-align: center;
+}
+.catalog-leaf-list {
+  display: flex;
+  flex-direction: column;
+  padding: 2px 0 4px 0;
+}
+.catalog-leaf {
+  background: transparent;
+  border: none;
+  color: var(--text-1);
+  padding: 4px 10px 4px 36px;
+  cursor: pointer;
+  font: inherit;
+  font-size: 12px;
+  text-align: left;
+  width: 100%;
+  border-radius: 0;
+  transition: background 0.1s, color 0.1s;
+  border-left: 2px solid transparent;
+}
+.catalog-leaf:hover { background: var(--bg-2); color: var(--text-0); }
+.catalog-leaf.active {
+  background: var(--bg-2);
+  color: var(--accent);
+  border-left-color: var(--accent);
 }
 .search-bar {
   display: flex;

@@ -6,6 +6,8 @@ import { addCube, addSphere, addPlane, addPointLight } from './primitives.js';
 import { initOutliner } from './outliner.js';
 import { initInspector } from './inspector.js';
 import { initSearch, getLastResults, setLastResults, downloadAndPlace } from './search.js';
+import { initCatalogUI, searchCategory, showTab, expandCategory, collapseCategory, getExpandedCategories } from './catalog-ui.js';
+import { getTree, getLeaf } from './catalog.js';
 import { initToast, toast } from './toast.js';
 import { saveSceneToLocal, restoreSceneFromLocal } from './persist.js';
 import { loadModelFromUrl } from './loader.js';
@@ -28,6 +30,15 @@ initSearch({
   providerBtn: $('provider-btn'),
   providerLabel: $('provider-label'),
   providerMenu: $('provider-menu'),
+  viewportWrap: $('viewport-wrap'),
+});
+initCatalogUI({
+  treeEl: $('catalog-tree'),
+  resultsEl: $('catalog-results'),
+  searchPane: $('search-pane'),
+  catalogPane: $('catalog-pane'),
+  tabSearch: $('tab-search'),
+  tabCatalog: $('tab-catalog'),
   viewportWrap: $('viewport-wrap'),
 });
 
@@ -137,7 +148,7 @@ sphere.position.set(1.4, 0.6, 0);
 // deseleciona pra inspector mostrar "no object selected" no boot
 setSelected(null);
 
-// expoe api programatica (window.clag) — Fase 0 Sims-mode
+// expoe api programatica (window.clag) — Fase 0 + Fase 1 Sims-mode
 initApi({
   addPrimitiveByKind,
   downloadAndPlace,
@@ -145,6 +156,12 @@ initApi({
   setLastResults,
   save: () => saveSceneToLocal(),
   load: async () => await restoreSceneFromLocal(addPrimitiveByKind, downloadAndPlaceFromMeta),
+  // catalogo
+  catalogSearchCategory: searchCategory,
+  catalogExpandCategory: expandCategory,
+  catalogCollapseCategory: collapseCategory,
+  catalogGetExpandedCategories: getExpandedCategories,
+  catalogShowTab: showTab,
 });
 
 toast('clag loaded — drag to orbit · click objects to select', { timeout: 4500 });

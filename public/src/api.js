@@ -22,6 +22,7 @@ import {
   worldPointAtScreen, renderer,
 } from './scene.js';
 import { providers, providerMap, searchAll } from './providers/index.js';
+import { getTree, getLeaf, allLeaves } from './catalog.js';
 
 // estes vem de main.js via initApi(deps) — modulos pesados ficam la pra evitar
 // dependencia circular de import
@@ -132,6 +133,33 @@ const actions = {
   toggleRightPanel() {
     document.getElementById('app').classList.toggle('no-right');
     return !document.getElementById('app').classList.contains('no-right');
+  },
+
+  // catalogo (Fase 1)
+  catalog: {
+    tree() { return getTree(); },
+    leaves() { return allLeaves(); },
+    getLeaf(id) { return getLeaf(id); },
+    async searchCategory(leafId) {
+      const d = ensureDeps();
+      return await d.catalogSearchCategory(leafId);
+    },
+    expand(id) {
+      const d = ensureDeps();
+      d.catalogExpandCategory(id);
+    },
+    collapse(id) {
+      const d = ensureDeps();
+      d.catalogCollapseCategory(id);
+    },
+    expanded() {
+      const d = ensureDeps();
+      return d.catalogGetExpandedCategories();
+    },
+    showTab(which) {
+      const d = ensureDeps();
+      d.catalogShowTab(which);
+    },
   },
 };
 
