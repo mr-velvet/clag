@@ -40,6 +40,32 @@ Mapa dos módulos, contratos entre componentes, e por onde os dados fluem.
 
 ---
 
+## Convenções de estado
+
+A engine não tem store centralizada. O estado vive em 3 lugares:
+
+1. **`userRoot` do three.js** — todos os objetos do usuário, com seus transforms e materials. É o estado canônico de "o que está na cena".
+2. **Ponteiro de seleção** (`selected` em `scene.js`) — referência ao objeto selecionado ou `null`.
+3. **`userData` de cada objeto** — metadados que a engine usa pra serializar e identificar:
+
+| Campo | Quem seta | Pra quê |
+|---|---|---|
+| `userData.sceneId` | `addToScene` | id único dentro da cena (`obj_3`, `light_a`, etc.). Estável durante a sessão. |
+| `userData.kind` | `primitives.js` ou `search.js` | string `'primitive:cube'`, `'primitive:sphere'`, `'primitive:plane'`, `'light:point'`, `'asset'`. Outliner usa pro badge; persist usa pra reidratar. |
+| `userData.assetMeta` | `search.js:downloadAndPlace` | só em objetos baixados de providers. Contém `{ source, sourceId, itemId, name, license, format, raw, thumb }`. Usado pelo persist pra rebaixar no `load`. |
+| `userData.isHelper` | helpers internos (ex: esfera visual da luz) | flag pra raycast/inspector ignorarem. |
+
+Mutações no estado da cena **sempre** passam pelas funções em `scene.js` (`addToScene`, `removeFromScene`, `setSelected`, `duplicateObject`). Editar `userRoot.children` direto é proibido — não dispara eventos.
+
+Persistência em `localStorage`:
+
+| Chave | Conteúdo |
+|---|---|
+| `clag:scene-v1` | JSON da cena atual (objetos com transform + meta) |
+| `clag:keys:<provider-id>` | API token de um provider que exige auth (ex: `clag:keys:sketchfab`) |
+
+---
+
 ## `scene.js` — núcleo
 
 **Responsabilidade**: dono dos singletons three.js + event bus + seleção + helpers de adicionar/remover.
@@ -205,7 +231,7 @@ Não há tree hierárquica aninhada por enquanto — futuramente quando suportar
 - Lights: salva color/intensity/distance
 - Assets: salva `assetMeta` (que tem provider id, item id, raw payload) + transform
 
-**`saveSceneToLocal()`** escreve em `localStorage:scene-ide:scene-v1`.
+**`saveSceneToLocal()`** escreve em `localStorage:clag:scene-v1`.
 
 **`restoreSceneFromLocal(addPrimitive, downloadAndPlaceMeta)`** lê e reidrata:
 - Primitivas: chama `addPrimitive(kind)` e aplica transform/cor

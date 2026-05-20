@@ -2,7 +2,7 @@
 
 > **Collage 3D engine** — uma engine 3D leve no browser focada em montar cenas como **colagem de assets públicos**, com pipeline 100% JavaScript e zero build step.
 
-🌐 **Live:** `https://clag.did.lu` (em breve) · 🧪 **Preview atual:** [st.did.lu/scene-ide/v2](https://st.did.lu/scene-ide/v2/index.html)
+🧪 **Preview:** [st.did.lu/scene-ide/v2](https://st.did.lu/scene-ide/v2/index.html) (deploy oficial em `clag.did.lu` quando estabilizar)
 
 ![clag screenshot](./screenshots/scene-ide-v2-prod.png)
 
@@ -10,11 +10,11 @@
 
 ## Por que `clag`
 
-Hoje montar uma cena 3D pra protótipo, mockup ou jogo indie é um processo fragmentado: você abre o Blender, abre o Sketchfab, abre Poly Haven, baixa zips, importa, ajusta escalas, exporta, importa em outra ferramenta. Cada salto custa contexto.
+Montar uma cena 3D pra mockup hoje é fragmentado: Blender + Sketchfab + Poly Haven + 8 abas. clag colapsa o fluxo em um editor no browser — digita "tree", arrasta o resultado pra cena, engine baixa e posiciona.
 
-**clag colapsa esse fluxo em um único editor no browser.** Você digita "tree", arrasta o resultado pra cena (vindo de Poly Haven, Khronos Samples, Sketchfab, etc.), e a engine baixa, normaliza, posiciona — pronto pra editar transform e materiais.
+Não é Blender. Não é Unity. É um editor de **colagem 3D** — rápido pra rascunhar.
 
-Não é Blender. Não é Unity. É **um editor de colagem 3D** — rápido pra rascunhar, exportar, e jogar fora.
+Análise de mercado, comparáveis e viabilidade como produto: [docs/PRODUCT-NOTES.md](./docs/PRODUCT-NOTES.md).
 
 ## O que tem hoje (PoC)
 

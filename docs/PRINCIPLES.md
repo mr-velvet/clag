@@ -58,7 +58,7 @@ Se um provider quebra (API caiu, mudou auth, etc.), os outros continuam funciona
 **Implicações práticas:**
 - Provider expõe **apenas** `search` e `download` — nenhuma outra API
 - Resultado de `search` é uma estrutura única e bem definida (ver ARCHITECTURE)
-- Provider que precise de chave usa `localStorage:scene-ide:keys:<id>` — engine fornece UI pra inserir
+- Provider que precise de chave usa `localStorage:clag:keys:<id>` — engine fornece UI pra inserir
 - Provider que precise de proxy (CORS hostil) **não é integrado**. Se chega no ponto de precisar de backend, vira issue de discussão de produto.
 
 ## 5. Licença explícita em todo lugar

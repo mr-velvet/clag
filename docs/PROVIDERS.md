@@ -33,7 +33,7 @@ export const needsKey    = false;   // true se precisa de API token
 
 // se needsKey=true:
 // export const keyHint = 'paste your token from <url>';
-// export function getKey() { return localStorage.getItem('scene-ide:keys:mysource') || ''; }
+// export function getKey() { return localStorage.getItem('clag:keys:mysource') || ''; }
 // export function setKey(k) { ... }
 
 export async function search(query, { signal } = {}) {
@@ -150,7 +150,7 @@ Quando download exige token:
 2. Se não tem, lança erro com instrução clara: `throw new Error('mysource: API token not configured. Click the key icon in the provider menu and paste your token from <url>.')`
 3. Engine não força o user a configurar antes de ver resultados — só quando ele tentar baixar
 
-Storage: `localStorage:scene-ide:keys:<id>` (consistente entre providers).
+Storage: `localStorage:clag:keys:<id>` (consistente entre providers).
 
 ### Download de .zip
 
