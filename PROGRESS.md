@@ -1,6 +1,6 @@
 # PROGRESS — clag
 
-Última atualização: 2026-05-21 (sessão encerrada por degradação — branch `feat/surface-snap-gizmo` pushada com gizmo implementado, MAS sem teste real no browser pelo user; próxima sessão precisa validar visualmente antes de qualquer merge)
+Última atualização: 2026-05-21 (revisão tripla rodada em paralelo — QA visual Playwright + code review + análise arquitetural. Relatório consolidado em [docs/PROPOSALS-2026-05-21.md](./docs/PROPOSALS-2026-05-21.md). **Branch NÃO mergeavel ainda — 2 regressões ALTA do gizmo + 3 ALTA de code review precisam fix.**)
 
 ## como usar este arquivo
 
@@ -8,7 +8,21 @@ Próximas sessões devem ler este arquivo PRIMEIRO. Estado vivo do projeto, pró
 
 ## status
 
-**GIZMO Opção D implementado em branch `feat/surface-snap-gizmo`. CÓDIGO NO REPO MAS NÃO VALIDADO VISUALMENTE PELO USER NESTA SESSÃO.** 8 commits desde main: D.1+D.2+D.3 (surface raycast + anti-overlap XZ + cadeado), patch pré-D.4 (6 fixes), D.4 (anti-overlap vertical), D.5 (hint, tooltip custom, hover bbox, cursor not-allowed, tunneling mitigation, API surface snap toggle), patch D.5 (surface-snap só no step final), cleanup de docs de cerimônia. Validação foi via Playwright pelos agentes que implementaram, não há QA visual independente.
+**GIZMO Opção D implementado em branch `feat/surface-snap-gizmo` — revisão tripla 2026-05-21 encontrou 5 ALTAs (2 QA + 3 code review). Branch NÃO mergeavel sem Wave 1+2 do plano de mitigação.** 8 commits desde main: D.1+D.2+D.3 (surface raycast + anti-overlap XZ + cadeado), patch pré-D.4 (6 fixes), D.4 (anti-overlap vertical), D.5 (hint, tooltip custom, hover bbox, cursor not-allowed, tunneling mitigation, API surface snap toggle), patch D.5 (surface-snap só no step final), cleanup de docs de cerimônia. Veredito final: ver [docs/PROPOSALS-2026-05-21.md](./docs/PROPOSALS-2026-05-21.md).
+
+## ⚠️ Revisão 2026-05-21 — achados ALTA bloqueando merge
+
+Detalhe em [docs/PROPOSALS-2026-05-21.md](./docs/PROPOSALS-2026-05-21.md). Resumo:
+
+- **QA-1** Surface-snap escala obstáculo em drag de salto médio (cube termina em Y=1.70 sobre sphere). Patch D.5 não cobriu todos caminhos.
+- **QA-2** Anti-overlap vertical bloqueia onde Y-ranges não sobrepõem (lustre Y=2.2 bloqueado por sphere Y=0.6). D.4 parcialmente quebrado.
+- **CR-1** Memory leak de AABBs em `persist.js:93` — loop de remoção bypassa `physics.unregister`.
+- **CR-2** RAF infinito do cadeado aloca `new Box3()` + `new Vector3()` a cada frame mesmo sem seleção.
+- **CR-3** Listener Esc duplicado entre `contextual-gizmo.js:92` e `scene.js:194` — Esc em drag também deseleciona.
+
+Plano de mitigação Wave 1 (2-3h): QA-1, QA-2, CR-1. Wave 2 (1.5h): CR-2/3/4/12. Wave 3+4: backlog v1.1.
+
+Console limpo (0 errors/warnings). API headless `window.clag` cobre ~95% UI. Princípios respeitados (exceto débito P8 dos 41 `title=` nativos pré-existentes). Arquitetura geral em saúde boa — risco real é módulo-deus `contextual-gizmo.js` (684 linhas) e `main.js` (468 linhas) acumulando responsabilidades.
 
 ## ⚠️ TRANSFERÊNCIA PARA NOVA SESSÃO — degradação observada em 2026-05-21
 
