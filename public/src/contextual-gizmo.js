@@ -1,4 +1,4 @@
-// contextual-gizmo.js — drag-to-translate + cadeado HTML overlay (D.1 + D.2 + D.3)
+// contextual-gizmo.js — drag-to-translate + cadeado HTML overlay (D.1 + D.2 + D.3 + D.5)
 //
 // Responsabilidades:
 //   - Detecta click/drag em objetos do userRoot via pointerdown/pointermove/pointerup
@@ -7,12 +7,19 @@
 //   - Threshold de 4px antes de "comitar" como drag (evita click virar drag)
 //   - Esc durante drag cancela (volta posição original)
 //   - Cadeado HTML overlay: 🔒/🔓 em screen-space sobre o objeto selecionado
-//   - Click no cadeado toggla userData.freeTransform
+//   - Click no cadeado toggla userData.freeTransform (com tooltip custom — D.5)
 //   - Durante drag: orbit desabilitado, cursor grabbing
 //   - W/E/R TransformControls tem prioridade — não interfere quando gizmo.dragging
 //
-// Limitações conhecidas (TODO D.5):
-//   - Tunneling em drag muito rápido
+// D.5 — polish e discoverability:
+//   - Hint flutuante no viewport ("arraste objetos pra mover") até primeira
+//     interação. Persistência em LS `clag:hint-seen` pra não voltar.
+//   - Tooltip custom no cadeado (substitui `title=` nativo — Princípio 8).
+//   - Bbox visual sutil ao hover (Box3Helper tracejado, opacity 0.4).
+//   - Cursor `not-allowed` durante slide (sweepXZ retorna `.blocked=true`).
+//   - Tunneling mitigation: drag rápido (>1u/frame) divide em sub-steps.
+//
+// Limitações conhecidas:
 //   - Objeto preso entre objetos sem saída (cadeado libera manualmente)
 //   - Touch/multi-touch fora de escopo
 
@@ -20,6 +27,7 @@ import * as THREE from 'three';
 import {
   scene, camera, orbit, gizmo, userRoot, renderer,
   getSelected, setSelected, notifySceneChanged, worldPointAtScreen,
+  on as sceneOn,
 } from './scene.js';
 import * as physics from './physics.js';
 import { applyAnchor } from './search.js';
@@ -28,12 +36,25 @@ import { applyAnchor } from './search.js';
 
 let _container = null;           // o viewport-wrap
 let _lockEl = null;              // div do cadeado
+let _tooltipEl = null;           // D.5: tooltip custom (substitui title= nativo)
+let _hintEl = null;              // D.5: hint flutuante de discoverability
+let _hoverBoxHelper = null;      // D.5: Box3Helper do bbox de hover
+let _hoverObj = null;            // objeto atualmente em hover (sem seleção)
+let _lastTargetXZ = null;        // D.5: último targetXZ pra tunneling mitigation
 let _isDragging = false;
 let _dragObj = null;
 let _dragOrigin = null;          // THREE.Vector3 — posição original pra Esc
 let _pointerDownPos = null;      // { x, y } em pixels
 let _dragCommitted = false;      // true quando threshold 4px foi ultrapassado
 const DRAG_THRESHOLD = 4;        // pixels
+
+// D.5: chave LS pro hint de discoverability
+const LS_HINT_SEEN = 'clag:hint-seen';
+// D.5: tunneling mitigation. > 0.25u entre frames triggera sub-steps.
+// 0.25u garante passo <= metade do menor AABB típico (1u). MAX=32 cobre drag
+// de tela inteira (~10-15u) sem pular colisor.
+const TUNNEL_STEP_THRESHOLD = 0.25;
+const TUNNEL_MAX_SUBSTEPS = 32;
 
 // raycaster reutilizado
 const _raycaster = new THREE.Raycaster();
@@ -50,6 +71,9 @@ export function setContextualMode(v) { _contextualMode = !!v; }
 export function initContextualGizmo({ container }) {
   _container = container;
   _buildLockOverlay();
+  _buildTooltip();        // D.5: tooltip custom (Princípio 8 — sem title= nativo)
+  _buildHint();           // D.5: hint flutuante de discoverability
+  _buildHoverBoxHelper(); // D.5: bbox tracejado de hover
 
   const canvas = renderer.domElement;
 
@@ -57,6 +81,12 @@ export function initContextualGizmo({ container }) {
   canvas.addEventListener('pointermove', _onPointerMove);
   canvas.addEventListener('pointerup',   _onPointerUp);
   canvas.addEventListener('pointerleave', _onPointerLeave);
+
+  // D.5: re-avalia visibilidade do hint quando cena muda (objeto adicionado/removido)
+  sceneOn('sceneChanged', _updateHintVisibility);
+  sceneOn('selectionChanged', _updateHintVisibility);
+  // tick inicial — caso boot tenha cena starter
+  _updateHintVisibility();
 
   // Esc durante drag cancela; fora de drag restaura modo contextual
   window.addEventListener('keydown', ev => {
@@ -89,7 +119,7 @@ export function initContextualGizmo({ container }) {
 function _buildLockOverlay() {
   _lockEl = document.createElement('div');
   _lockEl.className = 'lock-overlay hidden';
-  _lockEl.setAttribute('title', 'clique para alternar posicionamento livre');
+  // D.5 (GIZMO-5): sem title= nativo — tooltip custom é injetado via _buildTooltip.
   document.body.appendChild(_lockEl);
 
   _lockEl.addEventListener('click', ev => {
@@ -97,12 +127,115 @@ function _buildLockOverlay() {
     const sel = getSelected();
     if (!sel) return;
     _toggleLock(sel);
+    // atualiza texto do tooltip imediatamente pra refletir o novo estado
+    _updateTooltipForLock(sel);
   });
 
   _lockEl.addEventListener('pointerdown', ev => {
     // impede que o clique no cadeado chegue ao canvas e desfaça a seleção
     ev.stopPropagation();
   });
+
+  // D.5: tooltip custom no hover do cadeado
+  _lockEl.addEventListener('pointerenter', () => {
+    const sel = getSelected();
+    if (!sel) return;
+    _updateTooltipForLock(sel);
+    _showTooltipFor(_lockEl);
+  });
+  _lockEl.addEventListener('pointerleave', _hideTooltip);
+}
+
+// D.5 — tooltip custom (Princípio 8: zero `title=` nativo)
+function _buildTooltip() {
+  _tooltipEl = document.createElement('div');
+  _tooltipEl.className = 'tooltip-custom hidden';
+  document.body.appendChild(_tooltipEl);
+}
+
+function _updateTooltipForLock(sel) {
+  const locked = !sel.userData?.freeTransform;
+  _tooltipEl.textContent = locked
+    ? '🔒 ancorado à superfície (clique pra liberar)'
+    : '🔓 livre (clique pra ancorar)';
+}
+
+function _showTooltipFor(anchorEl) {
+  if (!_tooltipEl || !anchorEl) return;
+  _tooltipEl.classList.remove('hidden');
+  // posiciona logo abaixo do anchor
+  const rect = anchorEl.getBoundingClientRect();
+  // mede o próprio tooltip pra centralizar horizontalmente
+  const tRect = _tooltipEl.getBoundingClientRect();
+  const left = rect.left + rect.width / 2 - tRect.width / 2;
+  const top  = rect.bottom + 6;
+  _tooltipEl.style.left = `${Math.max(4, left)}px`;
+  _tooltipEl.style.top  = `${top}px`;
+}
+
+function _hideTooltip() {
+  if (_tooltipEl) _tooltipEl.classList.add('hidden');
+}
+
+// D.5 — hint de discoverability ("arraste objetos pra mover")
+function _buildHint() {
+  _hintEl = document.createElement('div');
+  _hintEl.className = 'viewport-hint hidden';
+  _hintEl.textContent = 'arraste objetos pra mover';
+  // anexa no viewport-wrap pra ficar relativo ao palco
+  if (_container) _container.appendChild(_hintEl);
+}
+
+function _updateHintVisibility() {
+  if (!_hintEl) return;
+  // se já viu, esconde pra sempre
+  let seen = false;
+  try { seen = localStorage.getItem(LS_HINT_SEEN) === '1'; } catch (_) {}
+  if (seen) { _hintEl.classList.add('hidden'); return; }
+
+  // mostra apenas quando: tem objetos na cena E nenhum está selecionado
+  const hasObjects = userRoot.children.some(c =>
+    !c.userData?.isHelper && !_isRoomPart(c),
+  );
+  const noSel = !getSelected();
+  _hintEl.classList.toggle('hidden', !(hasObjects && noSel));
+}
+
+function _markHintSeen() {
+  try { localStorage.setItem(LS_HINT_SEEN, '1'); } catch (_) {}
+  if (_hintEl) _hintEl.classList.add('hidden');
+}
+
+// D.5 — bbox visual ao hover (linhas sólidas com transparência — visual sutil)
+function _buildHoverBoxHelper() {
+  const box = new THREE.Box3(
+    new THREE.Vector3(-0.5, -0.5, -0.5),
+    new THREE.Vector3(0.5, 0.5, 0.5),
+  );
+  _hoverBoxHelper = new THREE.Box3Helper(box, 0xcccccc);
+  _hoverBoxHelper.material.transparent = true;
+  _hoverBoxHelper.material.opacity = 0.4;
+  _hoverBoxHelper.material.depthTest = false;
+  _hoverBoxHelper.visible = false;
+  _hoverBoxHelper.userData.isHelper = true;
+  _hoverBoxHelper.renderOrder = 999;
+  scene.add(_hoverBoxHelper);
+}
+
+function _showHoverBox(obj) {
+  if (!_hoverBoxHelper) return;
+  if (obj === _hoverObj && _hoverBoxHelper.visible) return;
+  _hoverObj = obj;
+  const box = new THREE.Box3().setFromObject(obj);
+  _hoverBoxHelper.box.copy(box);
+  _hoverBoxHelper.visible = true;
+  _hoverBoxHelper.updateMatrixWorld(true);
+}
+
+function _hideHoverBox() {
+  if (!_hoverBoxHelper) return;
+  _hoverBoxHelper.visible = false;
+  _hoverObj = null;
 }
 
 function _updateLockOverlay() {
@@ -170,6 +303,9 @@ function _onPointerDown(ev) {
   // TransformControls tem prioridade
   if (gizmo.dragging) return;
 
+  // D.5: primeira interação no canvas marca hint como visto
+  _markHintSeen();
+
   const sel = getSelected();
   const rect = renderer.domElement.getBoundingClientRect();
   _pointer.x = ((ev.clientX - rect.left) / rect.width)  * 2 - 1;
@@ -207,7 +343,7 @@ function _onPointerDown(ev) {
 
 function _onPointerMove(ev) {
   if (!_pointerDownPos || !_dragObj) {
-    // só hover: muda cursor
+    // só hover: muda cursor + mostra bbox
     _updateHoverCursor(ev);
     return;
   }
@@ -231,9 +367,12 @@ function _onPointerMove(ev) {
     // inicia drag
     _isDragging = true;
     _dragOrigin = _dragObj.position.clone();
+    _lastTargetXZ = _dragObj.position.clone(); // baseline pra tunneling
     orbit.enabled = false;
     if (_container) _container.classList.add('grabbing');
     renderer.domElement.style.cursor = 'grabbing';
+    // hover bbox some ao começar drag (objeto selecionado já tem highlight próprio)
+    _hideHoverBox();
   }
 
   if (!_isDragging) return;
@@ -243,32 +382,62 @@ function _onPointerMove(ev) {
   const worldPoint = worldPointAtScreen(ev.clientX, ev.clientY);
   const targetXZ = new THREE.Vector3(worldPoint.x, 0, worldPoint.z);
 
-  // D.4: ordem invertida — surface primeiro, sweep depois.
-  // surface decide o Y candidato (baseado no XZ raw sob o cursor); sweep usa
-  // esse Y no AABB candidato pra decidir overlap. Sem isso, sweep usa Y atual
-  // do obj e bloqueia lateralmente mesmo quando o cursor aponta pra cima de
-  // outro objeto (impede empilhamento).
-  const surface  = physics.surfaceUnder(_dragObj, targetXZ, userRoot);
+  // D.5 — tunneling mitigation: se o delta entre frames é grande (>1u em XZ),
+  // divide em sub-steps pra que sweep+surface rodem em cada passo intermediário.
+  // Sem isso, drag rápido pode atravessar colisor inteiro (AABB candidato pula
+  // por cima do obstáculo, yOverlap não detecta penetração intermediária).
+  const stepsXZ = _calcSubSteps(_lastTargetXZ, targetXZ);
+  let lastBlocked = false;
+  for (let i = 1; i <= stepsXZ; i++) {
+    const t = i / stepsXZ;
+    const sub = new THREE.Vector3(
+      _lastTargetXZ.x + (targetXZ.x - _lastTargetXZ.x) * t,
+      0,
+      _lastTargetXZ.z + (targetXZ.z - _lastTargetXZ.z) * t,
+    );
+    lastBlocked = _applyDragStep(_dragObj, sub) || lastBlocked;
+  }
+  _lastTargetXZ = targetXZ.clone();
 
-  // Fix Bug 11: compensa offset entre pivot e base do bbox.
-  // surface.y indica onde a BASE do objeto deve ficar; o pivot pode estar
-  // no centro — sem compensar, o objeto afunda meia-altura na superfície.
-  const _currentBox = new THREE.Box3().setFromObject(_dragObj);
-  const _baseOffset = _dragObj.position.y - _currentBox.min.y; // pivot -> base
-  const finalY = (surface ? surface.y : 0) + _baseOffset;
-
-  // sweep XZ — anti-overlap (D.2 + D.4 yOverlap).
-  // Passa candidateY (Y final, pós-surface) pro sweep ajustar o AABB candidato
-  // antes do teste de intersecção vertical.
-  const swept = physics.sweepXZ(_dragObj, targetXZ, userRoot, { candidateY: finalY });
-
-  // aplica posição
-  _dragObj.position.set(swept.x, finalY, swept.z);
-
-  // atualiza AABB do objeto draggado pra próxima iteração do sweep
-  physics.update(_dragObj);
+  // D.5 — cursor not-allowed durante slide (algum sub-step bloqueou)
+  if (lastBlocked) {
+    if (_container) _container.classList.add('colliding');
+  } else {
+    if (_container) _container.classList.remove('colliding');
+  }
 
   // não dispara sceneChanged a cada frame — só no commit (pointerup)
+}
+
+// D.5 — aplica um único passo de drag (surface + sweep + posição).
+// Retorna `true` se o sweep bloqueou a posição (slide ativo).
+function _applyDragStep(obj, targetXZ) {
+  // D.4: ordem invertida — surface primeiro, sweep depois.
+  const surface = physics.surfaceUnder(obj, targetXZ, userRoot);
+
+  // Fix Bug 11: compensa offset entre pivot e base do bbox.
+  const currentBox = new THREE.Box3().setFromObject(obj);
+  const baseOffset = obj.position.y - currentBox.min.y;
+  const finalY = (surface ? surface.y : 0) + baseOffset;
+
+  // sweep XZ — anti-overlap (D.2 + D.4 yOverlap).
+  const swept = physics.sweepXZ(obj, targetXZ, userRoot, { candidateY: finalY });
+
+  obj.position.set(swept.x, finalY, swept.z);
+  physics.update(obj);
+
+  // D.5: sweep agora retorna .blocked — propagamos pra cima pra cursor not-allowed
+  return !!swept.blocked;
+}
+
+// D.5 — decide quantos sub-steps usar baseado no delta XZ
+function _calcSubSteps(fromXZ, toXZ) {
+  if (!fromXZ) return 1;
+  const dx = toXZ.x - fromXZ.x;
+  const dz = toXZ.z - fromXZ.z;
+  const dist = Math.sqrt(dx * dx + dz * dz);
+  if (dist <= TUNNEL_STEP_THRESHOLD) return 1;
+  return Math.min(TUNNEL_MAX_SUBSTEPS, Math.ceil(dist / TUNNEL_STEP_THRESHOLD));
 }
 
 function _onPointerUp(ev) {
@@ -302,6 +471,7 @@ function _onPointerLeave() {
     _endDrag();
   }
   _resetCursor();
+  _hideHoverBox(); // D.5
 }
 
 function _cancelDrag() {
@@ -319,8 +489,12 @@ function _endDrag() {
   _dragObj = null;
   _pointerDownPos = null;
   _dragOrigin = null;
+  _lastTargetXZ = null;
   orbit.enabled = true;
-  if (_container) _container.classList.remove('grabbing');
+  if (_container) {
+    _container.classList.remove('grabbing');
+    _container.classList.remove('colliding'); // D.5
+  }
   _resetCursor();
 }
 
@@ -341,6 +515,7 @@ function _updateHoverCursor(ev) {
 
   if (hits.length === 0) {
     renderer.domElement.style.cursor = '';
+    _hideHoverBox(); // D.5
     return;
   }
 
@@ -353,12 +528,24 @@ function _updateHoverCursor(ev) {
   } else {
     renderer.domElement.style.cursor = 'default';
   }
+
+  // D.5 — bbox visual ao hover, só se NÃO for o objeto selecionado
+  // (selecionado já tem highlight próprio do TransformControls / cadeado).
+  const sel = getSelected();
+  if (hitObj !== sel) {
+    _showHoverBox(hitObj);
+  } else {
+    _hideHoverBox();
+  }
 }
 
 // -------------------- drag programático (para QA) --------------------
 
 // Move objeto pela pipeline sweep+surface sem interação de mouse.
 // Retorna posição final.
+//
+// D.5: tunneling mitigation também se aplica aqui. Sem isso, um QA chamando
+// dragObjectTo de (-5,0,0) → (5,0,0) com colisor em (0,0,0) atravessava direto.
 export function dragObjectTo(obj, targetXZ, userRoot_) {
   const root = userRoot_ || userRoot;
   const target = new THREE.Vector3(targetXZ.x ?? 0, 0, targetXZ.z ?? 0);
@@ -372,19 +559,20 @@ export function dragObjectTo(obj, targetXZ, userRoot_) {
     return obj.position.clone();
   }
 
-  // D.4: ordem invertida (ver comentário em _onPointerMove) — surface primeiro,
-  // sweep com candidateY depois. Empilhamento e travessia aérea dependem disso.
-  const surface = physics.surfaceUnder(obj, target, root);
-
-  // Fix Bug 11: compensa offset entre pivot e base do bbox (mesma lógica do drag visual).
-  // surface.y é onde a BASE deve pousar; ajusta Y para que aabb.min.y caia exatamente aí.
-  const currentBox = new THREE.Box3().setFromObject(obj);
-  const baseOffset = obj.position.y - currentBox.min.y;
-  const finalY = (surface ? surface.y : 0) + baseOffset;
-
-  const swept = physics.sweepXZ(obj, target, root, { candidateY: finalY });
-
-  obj.position.set(swept.x, finalY, swept.z);
+  // D.5: tunneling mitigation. Calcula sub-steps baseado no delta XZ
+  // entre posição atual e target. Cada sub-step roda surface+sweep,
+  // garantindo que colisões intermediárias não sejam puladas.
+  const fromXZ = new THREE.Vector3(obj.position.x, 0, obj.position.z);
+  const steps = _calcSubSteps(fromXZ, target);
+  for (let i = 1; i <= steps; i++) {
+    const t = i / steps;
+    const sub = new THREE.Vector3(
+      fromXZ.x + (target.x - fromXZ.x) * t,
+      0,
+      fromXZ.z + (target.z - fromXZ.z) * t,
+    );
+    _programmaticStep(obj, sub, root);
+  }
 
   // Fix GIZMO-1: re-aplica anchor de ceiling/wall após move programático.
   // Sem isso, dragObjectTo enviaria lustres pro chão (surface retorna Y=0 sem hit).
@@ -397,6 +585,18 @@ export function dragObjectTo(obj, targetXZ, userRoot_) {
   notifySceneChanged();
 
   return obj.position.clone();
+}
+
+// D.5 — versão "stateless" do step pro caminho programático
+// (não toca em _container/classList; só executa surface+sweep).
+function _programmaticStep(obj, target, root) {
+  const surface = physics.surfaceUnder(obj, target, root);
+  const currentBox = new THREE.Box3().setFromObject(obj);
+  const baseOffset = obj.position.y - currentBox.min.y;
+  const finalY = (surface ? surface.y : 0) + baseOffset;
+  const swept = physics.sweepXZ(obj, target, root, { candidateY: finalY });
+  obj.position.set(swept.x, finalY, swept.z);
+  physics.update(obj);
 }
 
 // -------------------- helpers --------------------

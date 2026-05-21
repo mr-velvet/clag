@@ -108,6 +108,10 @@ export function surfaceUnder(obj, targetXZ, userRoot) {
 // Retorna a posição final no plano XZ (sem mudar Y) — pode ser a posição
 // clamped caso haja colisão (slide pela face de colisão).
 //
+// D.5: o vetor retornado tem `blocked: boolean` anexado (`.blocked` no Vector3).
+// `true` quando alguma colisão fez o slide deslocar o resultado em relação ao
+// `targetPos` original — usado pelo gizmo pra trocar o cursor pra `not-allowed`.
+//
 // Algoritmo simples de slide:
 //   1. Calcula AABB candidato (translada AABB atual pra targetPos)
 //   2. Para cada outro objeto, testa intersecção em X, Z **e Y** (D.4)
@@ -224,7 +228,11 @@ export function sweepXZ(obj, targetPos, userRoot, opts = {}) {
     blocked = true;
   }
 
-  return new THREE.Vector3(finalX, targetPos.y, finalZ);
+  const out = new THREE.Vector3(finalX, targetPos.y, finalZ);
+  // D.5: anexa flag pro caller saber se o sweep mexeu na posição. Não usamos
+  // sub-classe (Vector3 já é referência ok) — só uma prop extra no objeto.
+  out.blocked = blocked;
+  return out;
 }
 
 // -------------------- helpers --------------------

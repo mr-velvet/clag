@@ -171,6 +171,16 @@ const actions = {
   setRotStep(deg) {
     return snap.setRotStep(deg);
   },
+
+  // D.5 (GIZMO-6): toggle programático de surface-snap.
+  // QA precisa controlar o comportamento de cola-na-superfície sem UI
+  // dedicada (o feature é defaultON e não tem botão visível ainda).
+  setSurfaceSnapEnabled(v) {
+    return snap.setSurfaceSnapEnabled(v);
+  },
+  toggleSurfaceSnap() {
+    return snap.setSurfaceSnapEnabled(!snap.isSurfaceSnapEnabled());
+  },
   setObjectFreeTransform(sceneId, free) {
     const obj = getUserObjects().find(o => o.userData?.sceneId === sceneId);
     if (!obj) throw new Error(`objeto nao encontrado: ${sceneId}`);
@@ -340,6 +350,9 @@ const state = {
   snapEnabled() { return snap.isEnabled(); },
   gridSize() { return snap.getGridSize(); },
   rotStep() { return snap.getRotStep(); },
+
+  // D.5: state getter pro surface-snap
+  surfaceSnapEnabled() { return snap.isSurfaceSnapEnabled(); },
   isObjectFreeTransform(sceneId) {
     const obj = getUserObjects().find(o => o.userData?.sceneId === sceneId);
     if (!obj) return null;
