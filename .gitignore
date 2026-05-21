@@ -8,3 +8,4 @@ node_modules/
 .playwright-mcp/
 screenshots/qa/
 screenshots/qa-pass*/
+screenshots/qa-gizmo*/

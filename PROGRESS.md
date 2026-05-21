@@ -1,6 +1,6 @@
 # PROGRESS — clag
 
-Última atualização: 2026-05-20 (sessão tarde-noite — SIMS-MODE v1 no ar em clag.did.lu, PROPOSALS.md criado, toast com botão "Configurar")
+Última atualização: 2026-05-20 (sessão noite — branch `feat/surface-snap-gizmo`: GIZMO Opção D sub-fases D.1-D.3 + patch pré-D.4)
 
 ## como usar este arquivo
 
@@ -8,7 +8,9 @@ Próximas sessões devem ler este arquivo PRIMEIRO. Estado vivo do projeto, pró
 
 ## status
 
-**SIMS-MODE v1 no ar em https://clag.did.lu.** Fases 0-4 entregues e validadas, deploy ok, bug fixes pós-deploy aplicados. Em 2026-05-20 (tarde-noite):
+**GIZMO Opção D em desenvolvimento em branch `feat/surface-snap-gizmo`.** Sub-fases D.1 (surface raycast), D.2 (anti-overlap XZ), D.3 (cadeado HTML overlay) implementadas e validadas em 2026-05-20 (sessão noite). Patch pré-D.4 com 6 fixes (Bug 11 pivot offset, Bug 13 AABB pós-load, Bug 12 dragObjectTo freeTransform, GIZMO-1 anchor re-apply, GIZMO-3 Esc contextual, GIZMO-2 LS migration) também aplicado. Falta D.4 (anti-overlap vertical) + D.5 (polish/discoverability) antes do merge pra main. Critério de merge: leigo monta cena de sala em <2min sem instrução.
+
+**SIMS-MODE v1 no ar em https://clag.did.lu** (main). Fases 0-4 entregues e validadas, deploy ok, bug fixes pós-deploy aplicados. Em 2026-05-20 (tarde-noite):
 - Layout 3 painéis (hierarchy / viewport / inspector) + asset browser embaixo
 - Cena editável com TransformControls (W/E/R/F/Del/Ctrl+D/Esc)
 - 3 providers integrados: Khronos, Poly Haven, Sketchfab (search anônima)
@@ -26,9 +28,11 @@ Repo: https://github.com/mr-velvet/clag
 
 Priorizado em [docs/PROPOSALS.md](./docs/PROPOSALS.md) (propostas longas) + [docs/ROADMAP.md](./docs/ROADMAP.md) (lista crua):
 
-1. **Decidir direção CONFIG** — proposta detalhada em PROPOSALS.md #1. Recomendação: Opção C (graduação) — começa contextual, gradua quando >3-5 itens órfãos. Discutir antes de implementar.
-2. **Protótipo GIZMO Opção D num branch** — surface-snap + anti-overlap (AABB sweep) + cadeado unificado. Proposta detalhada em PROPOSALS.md #2. ~2 semanas de implementação em 5 sub-fases (D.1 surface raycast → D.2 anti-overlap XZ → D.3 cadeado overlay → D.4 anti-overlap vertical → D.5 polish). Critério de merge: leigo monta cena em <2min sem instrução. Fallback pra Opção A (drag direto sem colisão) se sweep test mostrar limites técnicos.
-3. **v1.1 do ROADMAP.md em paralelo** — export `.glb` + `CREDITS.txt`, undo/redo básico (dependência implícita do gizmo D — saída natural se sweep prender o user), painel de licenças.
+1. **D.4 — anti-overlap vertical** (branch `feat/surface-snap-gizmo`). Lustre não atravessa lustre, objeto pousa em cima de outro sem clipping. ~2 dias. Hoje sweepXZ ignora Y e plano-fino (<0.05u) é filtrado — D.4 precisa estender pra eixo Y mantendo essas exceções.
+2. **D.5 — polish + discoverability**. Hint no viewport ("arraste objetos pra mover"); tooltip custom no cadeado (hoje usa `title=`); bbox visual ao hover (proposta linhas ~483); cursor `not-allowed` durante slide; tunneling mitigation pra drag rápido; expor `actions.setSurfaceSnapEnabled` na API (GIZMO-6 das ressalvas PM). ~2 dias.
+3. **Decisão de merge** — após D.4+D.5, testar leigo (cena de sala em <2min sem instrução). Se OK → merge pra main + deploy. Se falhar → fallback pra Opção A (drag direto sem anti-overlap) no mesmo branch.
+4. **Decidir direção CONFIG** — proposta detalhada em PROPOSALS.md #1. Recomendação: Opção C (graduação). Discutir antes de implementar.
+5. **v1.1 do ROADMAP.md em paralelo** — export `.glb` + `CREDITS.txt`, undo/redo básico (dependência implícita do gizmo D — saída natural se sweep prender o user), painel de licenças.
 
 ## próximos passos por ordem (médio)
 
@@ -59,6 +63,8 @@ Resumo — detalhe em PRINCIPLES.md:
 - **TransformControls + Inspector básico já é feature-completa pra v1.** Sem editor de animação, sem shader graph, sem renderer custom — fora do escopo.
 
 ## histórico
+
+- **2026-05-20 (sessão noite — GIZMO Opção D sub-fases D.1-D.3 + patch)**: branch `feat/surface-snap-gizmo` aberto. Trabalho coordenado em 3 agentes paralelos (DEV implementador + PM revisor + QA Playwright). **Commit `c9e026c` — D.1+D.2+D.3:** `public/src/physics.js` (~215 linhas) novo — AABB store + `sweepXZ` anti-overlap horizontal (slide pelo eixo de menor penetração, exclui `room:*` e planos com Y<0.05u) + `surfaceUnder` raycast vertical. `public/src/contextual-gizmo.js` (~355 linhas) novo — pointer handler com threshold 4px, drag-to-translate aplicando `sweepXZ + surfaceUnder` a cada frame, cadeado HTML overlay em screen-space (🔒 default, 🔓 destrava = `userData.freeTransform=true`), Esc cancela drag, W/E/R desliga modo contextual. `snap.js` ganha `surfaceSnapEnabled` + muda `DEFAULT_ENABLED` de grid pra false (grid-snap vira opt-in secundário). `api.js` expõe `actions.toggleLock/setObjectLock/dragObjectTo` + `state.isLocked/objectAABB`, `gizmoMode()` retorna 'contextual' por default. `scene.js` chama `physics.register/update/unregister` integrado no addToScene/removeFromScene/gizmo objectChange. **PM levantou 3 ressalvas** (anchor não re-aplicado pós-drag, W/E/R sem retorno ao contextual, LS migration ausente). **QA levantou 2 ALTAs** (Bug 11 surface-snap não compensa pivot-vs-base → objeto afunda meia-altura no chão; Bug 13 AABBs incorretos após `load()` → `registerAll` antes de `updateMatrixWorld`) + 1 MÉDIA (Bug 12 `dragObjectTo` API não respeita `freeTransform`). 16 screenshots em `screenshots/qa-gizmo-D/`. **Commit `94dcf60` — patch pré-D.4:** Fix 1 (Bug 11) `_onPointerMove` + `dragObjectTo` calculam `baseOffset = position.y - box.min.y` e adicionam `surface.y + baseOffset` pra plantar a BASE do objeto na superfície (não o pivot). Fix 2 (Bug 13) `scene.updateMatrixWorld(true)` antes de `physics.registerAll` nos 3 call sites (boot, btn-load, api.load). Fix 3 (Bug 12) `dragObjectTo` retorna early se `freeTransform=true` (simetria com drag visual). Fix 4 (GIZMO-1) `_onPointerUp` + `dragObjectTo` chamam `applyAnchor(obj, pos, {silent:true})` quando `anchor='ceiling'|'wall'` — lustre volta pro teto ao ser arrastado. Fix 5 (GIZMO-3) Esc fora de drag reseta `_contextualMode=true`; `actions.setGizmoMode('contextual')` chama `gizmo.detach()`. Fix 6 (GIZMO-2) migration silenciosa em `snap.js::loadFromStorage` — usuário com `clag:snap-enabled='true'` legado é sobrescrito pra `'false'` 1x (flag `clag:snap-migration-v2`), respeita user que já tinha desligado por conta própria. Validação Playwright pós-patch: cubo Y=0.5, esfera Y=0.6 (Fix 1 ✓), gizmoMode='contextual', snapEnabled=false (Fix 6 ✓), console limpo. Falta D.4 (anti-overlap vertical) + D.5 (polish/discoverability) antes de merge pra main.
 
 - **2026-05-20 (sessão tarde-noite — deploy + propostas)**: SIMS-MODE v1 deployado em https://clag.did.lu (commits 889bb4a → 2d98cb6 + 26404d8 + e86547d + 9bac984). Fases 0-4 entregues e validadas. Bug fix das thumbs colapsadas pós-deploy. **Sessão de propostas**: `docs/PROPOSALS.md` criado com 2 propostas longas — **CONFIG** (keys de provider, persistência, como crescer sem virar painel de admin) e **GIZMO** (alternativa leiga ao TransformControls mantendo W/E/R como avançado). CONFIG tem opções A/B/C; recomendação Opção C (graduação contextual→central). GIZMO tem opções A/B/C/D; recomendação Opção D — surface-snap + anti-overlap AABB + cadeado unificado (absorvendo tese do user sobre evitar sobreposição entre objetos e snap a superfície em vez de grade). Cada proposta tem trade-offs explícitos, ganchos pra implementação futura, edge cases mapeados. Conclusão da sessão: implementação das propostas pendente — discutir antes. **Pequeno ajuste de UX implementado**: `toast.js` ganha opção `action: { label, onClick }` que renderiza botão estilizado no lado direito do toast. `search.js::downloadAndPlace` catch detecta erro de key (mensagem padrão ou `provider.needsKey` sem entrada em localStorage) e dispara toast com botão "Configurar" que abre painel custom (modal com link pra obter token + input password + salvar/cancelar). `main.js::openProviderKeyPanel` substitui o caminho friccional de "achar ícone de chave no menu de provider — mensagem original do erro". Mensagem de erro do Sketchfab traduzida pra PT-BR. `api.js` expõe `actions.openProviderKeyPanel(providerId)` pra QA. Estilos novos: `.toast-action`, `.toast-text`, `.modal-row.full`, `.modal-link`. Zero componente nativo introduzido.
 

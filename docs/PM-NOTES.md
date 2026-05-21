@@ -707,3 +707,161 @@ Backlog absorvido em v1.1:
 - Labels Norte/Sul/Leste/Oeste — mantem ate QA reclamar
 
 ---
+
+## Revisao 2026-05-20 — commit c9e026c (D.1 + D.2 + D.3 branch feat/surface-snap-gizmo)
+
+**Veredito:** **AMARELO — nao mergear pra main antes de D.4+D.5.** Sub-fases D.1/D.2/D.3 funcionam como proof-of-concept, mas ha 3 problemas que tornam o merge prematuro: um bug de comportamento incorreto em anchor=ceiling durante drag, um problema de migracao de localStorage que quebra a promessa de default, e ausencia de qualquer discoverability do novo paradigma pra leigo.
+
+### Metodologia desta revisao
+
+Leitura completa de `physics.js`, `contextual-gizmo.js`, diffs de `scene.js`, `api.js`, `main.js`, `snap.js`, `styles.css`. Testes programaticos via `window.clag` no app em http://localhost:5045. Screenshots do estado visual.
+
+---
+
+### Avaliacao por criterio
+
+**Aderência SIMS-MODE** ⚠
+
+Anti-overlap XZ funciona: cubo desviou corretamente de X=-0.5 pra X=0.62 ao tentar sobrepor esfera. Cadeado travado (locked=true) por default — correto. Drag-to-translate XZ detectado via raycast + threshold 4px — correto. Cursor grab/grabbing implementado via CSS — correto.
+
+Problema: objeto com `anchor='ceiling'` vai pra Y=0 durante drag via `dragObjectTo`. O `contextual-gizmo.js::_onPointerMove` chama apenas `physics.surfaceUnder` (raycast pra baixo, sem hit retorna y=0), sem verificar `obj.userData.anchor`. Lustre arrastado por cena de sala cai no chao. Edge case #6 da proposta ("anchor=ceiling funciona naturalmente") nao esta implementado. Testado: `setObjectAnchor(id, 'ceiling')` + `dragObjectTo` retornou posicao y=0, deveria ser ~1.7m (y teto - metade da altura).
+
+**Principios** ✓ com ressalvas
+
+- P1 (zero build): intacto. Dois arquivos ES novos, sem dep nova.
+- P3 (pipeline simples): `physics.js` tem 215 linhas, bem comentadas, escopo limitado a AABB. Nao excede. `contextual-gizmo.js` tem 356 linhas — modular, responsabilidades claras. Nao polui.
+- P6 (state explicito): `userData.freeTransform` continua sendo o switch unificado, conforme proposto. `_contextualMode` em `contextual-gizmo.js` é novo state interno — nao exposto ao scene graph (aceitavel). `_store` em `physics.js` eh derivado (recalculado); nao precisa persistir (correto, conforme proposta linha 564).
+- P8 (componentes custom): cadeado eh `<div class="lock-overlay">` custom, 100%. Sem `title=""` nativo, sem `alert/confirm`. CSS custom com `position:fixed` + JS screen-space. Principio 8 ok.
+
+Ressalva P3: `DEFAULT_ENABLED` de `snap.js` mudou de `true` pra `false`. A intencao eh "surface-snap eh o novo default, grid-snap vira opt-in". Mas ha um problema de migracao descrito abaixo.
+
+**Edge cases** ⚠
+
+| # | Edge case | Status |
+|---|---|---|
+| 1 — objeto minusculo | Nao tratado (sem bbox visual expandida) — confirmado "nao priorizamos" pra D.1-D.3. Backlog D.5. |
+| 2 — objetos sobrepostos: qual recebe drag | Raycast pega o mais proximo da camera (hits[0]) — correto. |
+| 3 — threshold 4px evita drag acidental | Implementado em `_dragCommitted`. Esc cancela e volta `_dragOrigin`. Correto. |
+| 4 — drag rapido fora do plano XZ | `worldPointAtScreen` projeta no plano XZ — posicao deterministica mesmo fora da janela. Correto. |
+| 5 — anchor='wall' durante drag | Drag XZ ignora anchor (objeto move livremente). Anchor NAO eh re-aplicado ao soltar. Bug: quadro ancorado em parede vai pro chao ao ser arrastado. `pointerup` chama apenas `notifySceneChanged`, sem `applyAnchor`. A proposta linha 491 especificava "ao soltar, re-aplica anchor". Nao implementado. |
+| 6 — anchor='ceiling' durante drag | **Bug confirmado em teste.** Y cai pra 0. Proposta linha 493: "drag XZ funciona naturalmente, anchor re-aplicado ao soltar". Nao implementado. |
+| 7 — room:* nao draggable | `_isRoomPart` filtra nos candidatos do raycast. Correto. |
+| 8 — performance 200+ objetos | Raycast so no `pointerdown`, sweep O(N) no `pointermove`. Comentario documenta. Correto conforme proposta. |
+| 9 — undo/redo | Snapshot apenas no `pointerup`. Correto. Undo/redo em si fora de escopo. |
+| 10 — touch/mobile | Declarado fora de escopo. Pointer Events API unifica — arquitetura nao impede. |
+
+**Compatibilidade reversa** ✓ parcial
+
+- TransformControls W/E/R continuam funcionando: testado via API `setGizmoMode('translate/rotate/scale')` — correto. Esc nao volta pra contextual automaticamente (flag `_contextualMode=false` setada em keydown, mas nao ha mecanismo de reset apos Esc sem drag). Usuario que pressionar W fica preso em modo translate ate reload.
+- Snap-to-grid: `DEFAULT_ENABLED` agora `false` — correto como intencao. Mas usuario com sessao pre-D.3 tem `clag:snap-enabled=true` em LS e vai continuar com grid snap ON. A promessa "surface-snap eh o novo default" so vale pra sessoes novas. Testado: LS tinha `clag:snap-enabled=true` da sessao anterior, `snapEnabled()` retornou `true` mesmo com DEFAULT=false. Nenhuma migracao de LS foi implementada. Nao e bloqueante se o usuario for novo, mas e inconsistente pra usuario existente.
+- `setSurfaceSnapEnabled` nao esta exposto na API `window.clag`. Snap.js tem a funcao, mas api.js nao expoe. Leigo nao tem como desativar programaticamente.
+
+---
+
+### Achados novos (numerados e priorizados)
+
+**ALTA**
+
+1. **anchor='wall' e anchor='ceiling' nao sao re-aplicados apos drag (edge cases #5 e #6).**
+   - O que: `contextual-gizmo.js::_onPointerUp` chama apenas `physics.update` + `notifySceneChanged`. Nao chama `applyAnchor`. Lustre (anchor=ceiling) vai pra y=0 ao ser arrastado. Quadro de parede vai pro chao.
+   - Por que: quebra a promessa central de SIMS-MODE — "anchor=ceiling significa lustre no teto". Se o drag desfaz o anchor, o leigo nao sabe como recuperar (precisa usar inspector).
+   - Sugestao (D.4 ou patch): no `_onPointerUp`, se `obj.userData.anchor !== 'floor'`, chamar `applyAnchor(obj, null, { silent: true })` apos o commit. Re-aplica o Y correto sem feedback de toast duplicado.
+
+2. **Migracao de LS ausente: usuario com sessao pre-D.3 mantem grid snap ON.**
+   - O que: `DEFAULT_ENABLED=false` nao sobrescreve LS existente. Um usuario que ja usou clag continua com snap de grid ligado.
+   - Por que: a proposta GIZMO diz explicitamente "snap-to-grid vira opt-in secundario, surface-snap eh o default". Se o usuario existente nao experimenta o novo default, a proposta nao valida.
+   - Sugestao: no boot de `snap.js`, verificar se `clag:surface-snap-enabled` foi gravado. Se nao foi (primeira vez no D.3), setar `clag:snap-enabled=false` explicitamente. Flag de migracao: `localStorage.getItem('clag:snap-migrated-d3')`.
+
+**MEDIA**
+
+3. **W/E/R nao voltam pra modo contextual ao soltar (sem Esc ativo).**
+   - O que: `keydown` em W/E/R seta `_contextualMode=false`. Mas `scene.js` tem handler de Esc que chama `gizmo.detach()` — nao notifica `contextual-gizmo.js` pra resetar a flag. Usuario que pressiona W, move um objeto, e solta fica em modo translate pra sempre.
+   - Por que: inconsistencia de estado. Leigo que "acidentalmente" aperta W fica preso sem saber como destravar (precisa pressionar Esc, mas Esc so cancela drag ativo, nao reseta modo).
+   - Sugestao: no handler de Esc em `contextual-gizmo.js` (linha 62), tambem resetar `_contextualMode=true` quando nao ha drag ativo. Ou escutar o evento `gizmo.detach` de `scene.js`.
+
+4. **surfaceUnder detecta topo de outros objetos como superficie — objeto pode "subir" ao colidir.**
+   - O que: ao testar dois cubos no mesmo XZ, o segundo subiu pra y=0.956 (topo do primeiro cubo) apos o sweep desviar em X. O raycast pra baixo pegou o topo do cubo vizinho como superficie. O objeto ficou flutuando ao lado do primeiro.
+   - Por que: o sweep XZ desviou o candidato pra ao lado do sofa1, mas o raycast capturou o topo do sofa1 como hit (o rayo passou pelo topo). Resultado: objeto ao lado, mas elevado.
+   - Sugestao (D.4/D.5): apos sweep, excluir do `surfaceUnder` objetos cujo AABB XZ nao intersecta mais o candidato. Ou usar apenas `y=0` quando nao ha sobreposicao XZ confirmada.
+
+5. **Discoverability zero do novo paradigma de drag.**
+   - O que: o hint do viewport diz "arraste para orbitar · W mover · E girar · R escalar". Nao ha nenhuma indicacao de "arraste o objeto direto pra mover". Cadeado aparece so apos selecionar objeto — e mesmo assim sem tooltip explicativo de por que existe.
+   - Por que: leigo abre o app e ve a mesma mensagem de antes. Sem tentar clicar num objeto, nunca descobre que pode arrastar. O `title="clique para alternar posicionamento livre"` do cadeado e tooltip nativo (regra: nunca usar `title=""` — Principio 8).
+   - Sugestao: (a) adicionar ao hint "arraste objetos para mover"; (b) substituir `title=` do cadeado por tooltip custom (div CSS, como feito em outros elementos); (c) um toast discreto no primeiro drag bem-sucedido "👍 arrastar move o objeto — clique no 🔒 para liberar posicionamento".
+
+**BAIXA**
+
+6. **`setSurfaceSnapEnabled` existe em `snap.js` mas nao exposta na API `window.clag`.**
+   - Sem bloqueador — surface snap nao tem UI dedicada ainda. Mas pra QA testar headless, faz falta.
+   - Sugestao: expor `actions.setSurfaceSnapEnabled(bool)` e `state.surfaceSnapEnabled()` em `api.js`. Patch de 3 linhas.
+
+7. **Variavel `blocked` calculada em `sweepXZ` mas nunca usada.**
+   - `physics.js:193` seta `blocked=true` mas nao retorna esse valor. Proposta linha 569 menciona "cursor `not-allowed` brevemente quando slide ativo" — dependeria do `blocked`. Nao e bug, e feature pendente (D.5).
+
+---
+
+### Decisoes deliberadas do DEV — avaliacao do PM
+
+- **AABB nao rotaciona com objeto (axis-aligned fixo):** aprovado para v1. A proposta declarou isso explicitamente como trade-off aceitavel. Sims classico funciona igual. AABB fica maior que o objeto real em diagonais — pode bloquear antes do visual. Aceitavel pra D.1-D.3.
+- **Sweep apenas XZ (sem anti-overlap vertical em D.1-D.3):** aprovado, dentro do escopo declarado. D.4 fecha.
+- **Nenhum toast introduzido pra informar o usuario sobre o novo modo de drag:** questionado. A transicao de "TransformControls como default" pra "contextual drag como default" e uma mudanca de paradigma. Usuario antigo nao tem sinal nenhum de que o app mudou. Pelo menos um toast de boas-vindas ao feature seria adequado.
+- **`worldPointAtScreen` reusado de `scene.js`:** decisao correta. Reusar infraestrutura existente sem duplicar.
+- **Cadeado como `position:fixed` em `document.body`:** decisao correta. Evita z-index wars com o canvas e garante que ficara sempre sobre o viewport independente do layout.
+
+---
+
+### Pontos de tensao entre principios
+
+P3 (pipeline simples) vs completude do D.3: a sub-fase D.3 entregou o cadeado mas nao entregou re-aplicacao de anchor apos drag (achado 1). Isso cria uma situacao em que a feature parece completa mas quebra um caso central (lustre nao volta pro teto). A tensao e entre "entregar a sub-fase como combinado" e "entregar um comportamento coerente". PM avalia que o bug de anchor regressao (achado 1) e bloqueante — nao e polimento, e comportamento errado.
+
+---
+
+### Checagem de criterios do checklist de PM (diff apenas)
+
+- **A. Linguagem PT-BR:** zero texto novo exposto ao usuario (modulos sao internos). Tooltip nativo `title=` no cadeado e violacao do Principio 8 — ver achado 5b.
+- **B. Defaults sensatos:** DEFAULT_ENABLED=false correto na intencao. Problema de migracao — achado 2.
+- **C. Hierarquia visual:** cadeado centralizado sobre objeto em screen-space, 20px acima do centro. Visual discreto, nao polui. Aprovado.
+- **G. API:** `toggleLock`, `setObjectLock`, `dragObjectTo`, `isLocked`, `objectAABB` — todos funcionando conforme testado. `setSurfaceSnapEnabled` ausente — achado 6.
+- **H. Principios:** P1 ok, P3 ok, P6 ok com ressalva, P8 quase ok (title= nativo no cadeado).
+- **I. Escopo:** physics.js eh AABB-only, sem integracao de fisica real. Dentro do escopo.
+
+---
+
+### Bugs identificados nesta revisao
+
+| # | Descricao | Severidade | Origem |
+|---|---|---|---|
+| GIZMO-1 | anchor=ceiling/wall nao re-aplicado apos pointerup | ALTA | achado 1 |
+| GIZMO-2 | Migracao de LS snap ausente — usuario existente mantem grid snap ON | MEDIA | achado 2 |
+| GIZMO-3 | W/E/R nao retornam a contextual apos Esc | MEDIA | achado 3 |
+| GIZMO-4 | surfaceUnder eleva objeto ao colidir (topo do vizinho vira superficie) | MEDIA | achado 4 |
+| GIZMO-5 | title= nativo no cadeado viola Principio 8 | BAIXA | achado 5b |
+| GIZMO-6 | setSurfaceSnapEnabled ausente da API | BAIXA | achado 6 |
+
+---
+
+### Pergunta-mestra
+
+"Se um roteirista nao-tecnico abrir o app hoje (branch feat), ele consegue montar uma cena simples com drag-to-move sem instrucao?"
+
+**Parcialmente.** O drag-to-translate XZ funciona e o anti-overlap e uma melhoria real — nao ha mais sobreposicao involuntaria em plano XZ. O cadeado aparece visualmente e e clicavel. Porem:
+- Usuario nao descobre o drag (hint nao menciona).
+- Primeiro arraste de lustre vai pro chao (anchor nao re-aplicado).
+- Usuario que ja usou o app antes nao experimenta o novo default de snap.
+
+Saldo: feature tecnicamente funcional no nucleo (D.1+D.2+D.3 passam nos testes basicos), mas UX do produto ainda tem buracos que o leigo vai cair antes de chegar na diferenciacao.
+
+---
+
+### Decisao: **NAO mergear pra main ainda. Continuar em feat/surface-snap-gizmo.**
+
+Fechar GIZMO-1 (re-aplicar anchor apos drag) e GIZMO-3 (retorno a contextual apos Esc) antes de qualquer outra coisa. Sao comportamentos errados, nao polish. D.4 (anti-overlap vertical) e D.5 (polish) podem entrar no mesmo branch. Criterio de merge do PM: roteirista arrasta lustre, ele vai pro teto, nao pro chao.
+
+Backlog acumulado nao bloqueante:
+- GIZMO-2 — migracao de LS (pode entrar junto com D.4 ou D.5)
+- GIZMO-4 — objeto sobe ao colidir (D.4/D.5)
+- GIZMO-5 — title= nativo no cadeado (D.5)
+- GIZMO-6 — setSurfaceSnapEnabled na API (D.5)
+- Discoverability do drag (hint + toast de boas-vindas) — D.5
+
+---

@@ -864,3 +864,165 @@ Justificativa:
 - **Zero regressoes em Fase 0-3.** Cobertura UI → API 100%. Console limpo.
 
 Recomendacao pro PM: deploy v1 ja, abrir issue pra Bug 9 + Bug 10 no backlog pos-deploy. Nenhum dos dois bloqueia a primeira impressao de quem testar o sims-mode.
+
+---
+
+## 2026-05-20 — gizmo D.1-D.3 (commit c9e026c)
+
+### Contexto
+
+- **Commit testado:** `c9e026c` (sub-fases D.1 surface-snap + D.2 anti-overlap XZ + D.3 cadeado HTML overlay).
+- **Branch:** `feat/surface-snap-gizmo`.
+- **Arquivos novos:** `public/src/physics.js` (~215 linhas), `public/src/contextual-gizmo.js` (~356 linhas).
+- **Servidor:** Express na porta `5045`. Boot limpo, 0 errors, 0 warnings.
+- **Viewport:** 1440x900 (default Playwright).
+- **localStorage limpo** antes da suite (hard reset via `localStorage.clear()` + reload).
+- **Nota pre-suite:** app carregava cena do localStorage anterior (5 objetos + sala) antes do clear. Limpeza necessaria para testar boot real.
+
+### Tabela de cenarios
+
+| Cenario | Esperado | Observado | Status |
+|---|---|---|---|
+| C1 Boot limpo | 3 objetos (Ground/Cube/Sphere), gizmoMode='contextual', 0 erros | 3 objetos, contextual, snap=false, 0 erros | PASS |
+| C2 Cadeado fechado no add | addPrimitive retorna sceneId, 🔒 visivel, isLocked=true | SceneId ok, 🔒 visivel, isLocked=true | PASS |
+| C2 Click cadeado abre 🔓 | Apos click: isLocked=false, visual 🔓, classe unlocked | Apos click via Playwright: isLocked=false, 🔓, .unlocked | PASS |
+| C3 Anti-overlap XZ drag | Mover esfera pra cima do cubo -> slide pra fora sem overlap XZ | overlapX=true, overlapZ=false (sem overlap real), posicao final deslocada | PASS |
+| C4 Surface snap D.1 | Objeto draggado cola na superficie (y = 0 + altura/2 = 0.5 pra cubo 1x1) | Y = ~0 (pivot no nivel do chao), aabb.min.y = -0.5 (penetra chao) | **FAIL (Bug 11 ALTA)** |
+| C5 Anti-overlap 2 cubos | Cubo B nao sobrepoe cubo A no plano XZ | Cubo B bloqueado, hasXZOverlap=false | PASS |
+| C6 W ativa TransformControls | Modo vira 'translate', botao UI ativo, gizmo 3 setas visivel | gizmoMode='translate', btn ativo | PASS |
+| C6 Esc volta ao contextual | Apos Esc: gizmoMode='contextual' | gizmoMode permanece 'translate' | **OBS (ver abaixo)** |
+| C6 setGizmoMode('contextual') via API | Retorna 'contextual', estado restaurado | Funciona via API | PASS |
+| C7 Sala criada | 6 pecas room:*, hasRoom=true, roomDimensions correto | OK | PASS |
+| C7 Cubo atravessa parede | Esperado D.1-D.3: cubo PODE atravessar (room:* excluida do sweep) | Cubo vai ate (10,0,10) sem bloqueio | OBS (esperado) |
+| C8 freeTransform bypassa sweep via mouse | Objeto destravado pode sobrepor via drag manual | Nao testavel via dragObjectTo — sweep sempre aplicado na API | OBS (ver Bug 12) |
+| C9 Snap default OFF | snapEnabled()=false por default (proposta D) | snapEnabled()=false | PASS |
+| C9 toggleSnap funciona | on/off/on correto | on->true, off->false | PASS |
+| C10 Save persiste freeTransform | localStorage tem freeTransform=true | localStorage tem freeTransform=true no cubo destravado | PASS |
+| C10 Load restaura cadeado | Apos reload+load: isLocked/freeTransform corretos | isLocked=false pra cubo que tinha freeTransform=true | PASS |
+| C10 Load restaura sala | Sala recriada com dims corretas | hasRoom=true, dims 4x3x2.5 | PASS |
+| C10 AABBs corretas pos-load | Todos AABBs refletem posicao real do objeto | AABBs de todos os cubos apontam pra mesma posicao errada ate 1o drag | **FAIL (Bug 13 ALTA)** |
+
+### Bugs encontrados
+
+#### Bug 11 — Surface snap D.1 nao compensa meia-altura do objeto — pivot penetra o chao (ALTA)
+
+- **Repro:** `addPrimitive('cube')` → `dragObjectTo(id, { x: 3, z: 3 })`. `objects()[n].position[1] === ~0`. AABB: `min.y = -0.5, max.y = +0.5` — objeto centrado em Y=0, metade abaixo do chao.
+- **Causa:** `contextual-gizmo.js:245` faz `_dragObj.position.set(swept.x, finalY, swept.z)` onde `finalY = surface.y` (= 0 pro chao). Mas `surface.y` e o Y da superficie, nao o Y do centro do objeto. Objeto com pivot centrado precisa de `finalY = surface.y + objHeight/2`.
+- **Comparacao:** `addPrimitive` coloca cubo em Y=0.5 corretamente (via `addToScene` que usa pos padrao). So o drag via `surfaceUnder` retorna Y=0 e nao compensa.
+- **Impacto:** Todo objeto arrastado visualmente penetra o chao. Anti-overlap de D.2 tambem fica comprometido pois AABB do objeto draggado fica com min.y=-0.5 (abaixo do nivel do chao), causando potenciais falsos positivos de colisao com outros objetos nessa regiao.
+- **Fix:** Em `surfaceUnder` (ou no caller em `contextual-gizmo.js`): `finalY = surface.y + objHeight/2`. Ou calcular `objHeight` a partir de `myBox.max.y - myBox.min.y` e adicionar metade ao hit.point.y.
+- **Screenshot:** `screenshots/qa-gizmo-D/005-surface-snap-penetracao-chao.png`
+
+#### Bug 12 — `dragObjectTo` API sempre aplica sweep mesmo com freeTransform=true (MEDIA)
+
+- **Repro:** Setar objeto A com freeTransform=true. Chamar `dragObjectTo(A.sceneId, posicaoDeB)`. Objeto A e bloqueado pelo sweep como se estivesse travado — nao pode ser movido para cima de B via API.
+- **Causa:** `contextual-gizmo.js:218-223` verifica `freeTransform` e pula o drag contextual (correto pra drag visual). Mas `contextual-gizmo.js::dragObjectTo` exportado nao faz essa verificacao — chama `sweepXZ` sempre.
+- **Impacto:** Assimetria entre comportamento visual (mouse) e programatico (API): mouse drag de objeto destravado ignora collisao, mas `dragObjectTo` nao. Agente QA ou externo que tenta "mover objeto destravado por cima de outro" via API nao consegue.
+- **Fix sugerido:** `dragObjectTo` verificar `obj.userData.freeTransform` e pular `sweepXZ` se true (mesma logica do handler de mouse).
+- **Screenshot:** `screenshots/qa-gizmo-D/011-freeTransform-sweep-inconsistente.png`
+
+#### Bug 13 — AABBs incorretas apos load() — anti-overlap quebrado ate 1o drag por objeto (ALTA)
+
+- **Repro:** `save()` → reload pagina → `load()` → `objectAABB(sceneId)` em qualquer cubo retorna AABB identica (posicao do primeiro objeto na lista), nao a AABB correspondente ao objeto. Exemplo: cubo em (10,0,10) tem AABB de (-1.21, 0, -1.35) a (-0.21, 1, -0.35).
+- **Causa:** `physics.registerAll(userRoot)` e chamado no boot antes do Three.js processar as `matrixWorld` dos objetos recem-criados pelo `load()`. `Box3.setFromObject(obj)` depende de `matrixWorld` estar atualizada. Se o objeto ainda nao teve `updateMatrixWorld`, retorna AABB na origem ou com transformacoes incorretas.
+- **Impacto:** Ate o primeiro drag de cada objeto (que chama `physics.update(obj)` que recalcula a AABB corretamente), todos os objetos carregados tem AABBs invalidas. Anti-overlap da Fase D.2 funciona de forma errada logo apos load — objetos colidem onde nao deveriam ou nao colidem onde deveriam.
+- **Fix sugerido:** Chamar `scene.updateMatrixWorld(true)` antes de `physics.registerAll(userRoot)` no load. Ou: chamar `physics.update(obj)` para cada objeto APOS o Three.js renderer ter executado pelo menos 1 frame (`requestAnimationFrame`).
+- **Screenshot:** `screenshots/qa-gizmo-D/013-pos-load-aabbs-erradas.png`
+
+### Observacoes
+
+#### Obs A — Esc nao volta ao modo contextual apos W/E/R (fora do drag)
+
+- **Repro:** pressionar W → gizmoMode='translate'. Pressionar Esc (sem estar no meio de um drag). Modo permanece 'translate'.
+- **Proposta diz:** "Esc volta pra contextual". Mas o codigo `contextual-gizmo.js:61-65` so cancela drag com Esc, nao restaura modo contextual apos W. O comment no codigo diz "W/E/R voltam pro modo contextual quando Esc sem drag (ja tratado em scene.js)" — mas esse tratamento nao esta funcionando ou scene.js nao esta fazendo isso.
+- **Workaround:** `setGizmoMode('contextual')` via API restaura. Pressionar Esc depois de W sem drag nao restaura.
+- **Severidade:** media. Nao e regressao (contextual e novo). Mas frustra expectativa documentada na proposta.
+
+#### Obs B — Cubo atravessa parede da sala (esperado em D.1-D.3)
+
+- `physics.sweepXZ` exclui objetos `room:*` via `if (_isRoomPart(entry.obj)) continue` (linha 142). Comportamento intencional. D.4 deveria incluir paredes no sweep.
+- Documentado como OBS por ser escopo futuro.
+
+#### Obs C — addPrimitive sem snap OFF coloca objetos em posicoes nao-inteiras
+
+- Com `snapEnabled=false` (default do branch D), `addPrimitive('cube')` retorna `position: [-0.714, 0.5, -0.857]`. Sao frações derivadas de calculo interno sem snap. Em sessoes anteriores (Fase 2+) com snap ON, as posicoes eram multiplos de 0.5 limpas. Sem snap, starter scene nao fica simetrica/alinhada. Nao e bug — e a logica esperada. Mas o starter scene poderia resetar snap/posicionar cubos em posicoes redondas pra primeiro impacto mais limpo.
+
+#### Obs D — `dragObjectTo` API com freeTransform bypassa cadeado no sentido errado
+
+- Objeto com freeTransform=true DEVERIA poder sobrepor (sem sweep). Via API (`dragObjectTo`), o sweep e sempre aplicado — objeto nao pode sobrepor mesmo que destravado. Via mouse drag visual, sweep e pulado corretamente.
+- Documentado como Bug 12 (MEDIA) mas tambem como observacao de design de API.
+
+#### Obs E — Snap default mudou de true (Fase 2) para false (branch D)
+
+- Proposta D.1-D.3 correto. Default is false pra surface-snap ser o comportamento primario. Passa o cenario 9. Mas e uma **mudanca de comportamento** em relacao a Fase 2 — dev deve garantir que o commit de merge documente isso.
+
+### Componentes nativos detectados
+
+- **2x `<input type="color">`** no inspector — pre-existente desde Pass2 (Observacao 6). NAO e regressao dos commits D.1-D.3.
+- Sem `<select>` nativo.
+- Sem `confirm()/alert()` detectados.
+- Scrollbar: custom CSS presente (`::-webkit-scrollbar`).
+- Cadeado overlay: background custom, cursor pointer — correto.
+- Focus ring: nao auditado em profundidade nesta sessao.
+
+### Console errors
+
+**Zero erros, zero warnings** em toda a suite. Console limpo.
+
+### API programatica — novos endpoints D.1-D.3
+
+| Endpoint | Existe? | Testado? | Resultado |
+|---|---|---|---|
+| `actions.toggleLock(sceneId)` | sim | sim | OK — toggle correto, erro em id invalido |
+| `actions.setObjectLock(sceneId, locked)` | sim | sim | OK |
+| `actions.dragObjectTo(sceneId, targetXZ)` | sim | sim | OK — mas bug freeTransform (Bug 12) |
+| `state.isLocked(sceneId)` | sim | sim | OK |
+| `state.objectAABB(sceneId)` | sim | sim | OK em runtime, errado pos-load (Bug 13) |
+| `state.snapEnabled()` | sim | sim | OK — default false |
+| `state.gizmoMode()` retorna 'contextual' | sim | sim | OK |
+| `actions.setGizmoMode('contextual')` | sim | sim | OK |
+
+### Veredito QA — D.1-D.3
+
+**AMARELO — NO-GO para D.4** ate Bug 11 e Bug 13 serem fechados.
+
+Justificativa:
+
+- **Bug 11 (ALTA):** Surface snap nao compensa meia-altura — todo objeto arrastado penetra o chao. E o comportamento central da sub-fase D.1 e esta errado. Visualmente o produto fica com objetos semienterrados, o que destroi a proposta de valor ("objetos colam na superficie").
+- **Bug 13 (ALTA):** AABBs erradas pos-load quebram o anti-overlap (D.2) ate o primeiro drag de cada objeto. Roundtrip save/load deixa o estado de fisica inconsistente.
+- **Bug 12 (MEDIA):** Inconsistencia entre drag visual e API para objetos desbloqueados. Bloqueia QA programatico do cenario 8 e frustra expectativa de espelho API/UI.
+- **Obs A (MEDIA):** Esc nao restaura modo contextual — comportamento documentado na proposta nao implementado.
+
+O que esta bom:
+- Anti-overlap XZ entre objetos funciona corretamente (Cenarios 3 e 5).
+- Cadeado visual 🔒/🔓 funciona, persiste no save/load, estado restaurado.
+- W/E/R ativa TransformControls, volta via API.
+- Sala criada, objetos atravessam parede (esperado D.1-D.3).
+- snap default OFF correto.
+- Zero erros de console.
+- API nova (toggleLock, setObjectLock, dragObjectTo, isLocked, objectAABB) funcional exceto lacunas apontadas.
+
+Recomendacao antes de D.4:
+1. **Fix Bug 11:** `finalY = surface.y + objHeight/2` em `contextual-gizmo.js` (1 linha).
+2. **Fix Bug 13:** chamar `scene.updateMatrixWorld(true)` + `physics.registerAll` apos 1 frame do load, ou iterar com `physics.update(obj)` pos-load.
+3. **Fix Bug 12 (se possivel em paralelo):** `dragObjectTo` verificar `obj.userData.freeTransform` e pular sweep.
+4. **Obs A:** revisar logica de Esc em `scene.js` para restaurar contextual quando fora de drag.
+
+### Screenshots
+
+- `screenshots/qa-gizmo-D/001-boot-limpo.png` — boot sem localStorage, 3 objetos starter, gizmoMode=contextual
+- `screenshots/qa-gizmo-D/002-cadeado-fechado.png` — cubo adicionado com 🔒 visivel no centro
+- `screenshots/qa-gizmo-D/003-cadeado-aberto.png` — apos click: 🔓 com classe unlocked
+- `screenshots/qa-gizmo-D/004-anti-overlap-xz.png` — esfera deslizada apos tentativa de overlap com cubo
+- `screenshots/qa-gizmo-D/005-surface-snap-penetracao-chao.png` — cubo arrastado com metade abaixo do chao (Bug 11)
+- `screenshots/qa-gizmo-D/006-anti-overlap-dois-cubos.png` — cubo B bloqueado pelo cubo A, posicionado adjacente
+- `screenshots/qa-gizmo-D/007-w-translate-mode.png` — W ativou TransformControls translate, 3 setas visiveis
+- `screenshots/qa-gizmo-D/008-volta-contextual.png` — modo contextual restaurado via API
+- `screenshots/qa-gizmo-D/009-sala-criada.png` — sala 4x3x2.5, 6 pecas room:* no outliner
+- `screenshots/qa-gizmo-D/010-cubo-atravessa-parede-esperado.png` — cubo fora da sala em (10,0,10) (OBS B, esperado)
+- `screenshots/qa-gizmo-D/011-freeTransform-sweep-inconsistente.png` — dragObjectTo bloqueia objeto destravado (Bug 12)
+- `screenshots/qa-gizmo-D/012-pre-reload-estado.png` — estado antes do reload
+- `screenshots/qa-gizmo-D/013-pos-load-aabbs-erradas.png` — AABBs todas erradas pos-load (Bug 13)
+- `screenshots/qa-gizmo-D/014-pos-load-cena-restaurada.png` — cena restaurada visualmente correta
+- `screenshots/qa-gizmo-D/015-cadeado-aberto-restaurado-pos-load.png` — freeTransform=true restaurado corretamente pos-load
+- `screenshots/qa-gizmo-D/016-estado-final.png` — estado final pos-suite
