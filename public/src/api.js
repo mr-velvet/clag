@@ -27,11 +27,16 @@ import { providers, providerMap, searchAll } from './providers/index.js';
 import { getTree, getLeaf, allLeaves } from './catalog.js';
 import * as snap from './snap.js';
 import * as physics from './physics.js';
+// CR-10 (wave-b2, 2026-05-21): cgToggleLock removido daqui — toggleLock agora
+// delega pra setObjectFreeTransform, que tem o caminho canônico (re-aplica snap).
+// O cadeado HTML continua usando cgToggleLock internamente em contextual-gizmo.
 import {
-  toggleLock as cgToggleLock,
   dragObjectTo as cgDragObjectTo,
   isContextualMode, setContextualMode,
 } from './contextual-gizmo.js';
+// CR-9 (wave-b2, 2026-05-21): predicado compartilhado pra consultar
+// freeTransform — antes era `!!` ou `=== true` ou `!` dependendo do site.
+import { isFreeTransform } from './state-helpers.js';
 // runSearchUI / setActiveProvider vem via deps pra evitar acoplamento direto,
 // mas como search.js ja eh importado em main, pegamos via deps em initApi.
 
@@ -181,41 +186,69 @@ const actions = {
   toggleSurfaceSnap() {
     return snap.setSurfaceSnapEnabled(!snap.isSurfaceSnapEnabled());
   },
+  // CR-10 (wave-b2, 2026-05-21): caminho canônico pra setar freeTransform.
+  // toggleLock e setObjectLock delegam aqui — antes divergiam: este chamava
+  // snap.applySnapToObject ao re-ancorar, toggleLock (via cgToggleLock) não.
   setObjectFreeTransform(sceneId, free) {
     const obj = getUserObjects().find(o => o.userData?.sceneId === sceneId);
     if (!obj) throw new Error(`objeto nao encontrado: ${sceneId}`);
     obj.userData.freeTransform = !!free;
-    // se voltou a snapar, aplica imediatamente
-    if (!obj.userData.freeTransform) snap.applySnapToObject(obj);
+    // se voltou a snapar, aplica imediatamente (re-encaixe na grade)
+    if (!isFreeTransform(obj)) snap.applySnapToObject(obj);
     // Fix Bug 5: emite sceneChanged direto pra inspector re-renderizar e
     // refletir o estado novo do toggle (texto + classe .active).
     notifySceneChanged();
-    return { sceneId, freeTransform: obj.userData.freeTransform };
+    return { sceneId, freeTransform: isFreeTransform(obj) };
   },
 
-  // D.3: cadeado — toggla freeTransform por objeto
+  // D.3: cadeado — toggla freeTransform por objeto.
+  // CR-10: delega pra setObjectFreeTransform pra unificar comportamento
+  // (re-aplica snap ao re-ancorar). Antes chamava cgToggleLock direto, que
+  // não disparava snap.applySnapToObject.
   toggleLock(sceneId) {
     const obj = getUserObjects().find(o => o.userData?.sceneId === sceneId);
     if (!obj) throw new Error(`objeto nao encontrado: ${sceneId}`);
-    cgToggleLock(obj);
-    return { sceneId, locked: !obj.userData.freeTransform };
+    const newFree = !isFreeTransform(obj);
+    actions.setObjectFreeTransform(sceneId, newFree);
+    return { sceneId, locked: !newFree };
   },
+  // CR-10: idem — delega pra setObjectFreeTransform.
   setObjectLock(sceneId, locked) {
     const obj = getUserObjects().find(o => o.userData?.sceneId === sceneId);
     if (!obj) throw new Error(`objeto nao encontrado: ${sceneId}`);
-    obj.userData.freeTransform = !locked;
-    if (locked && !obj.userData.freeTransform) snap.applySnapToObject(obj);
-    notifySceneChanged();
-    return { sceneId, locked };
+    actions.setObjectFreeTransform(sceneId, !locked);
+    return { sceneId, locked: !!locked };
   },
 
   // D.1/D.2: move objeto programaticamente pela pipeline sweep+surface.
   // Retorna posição final. Crítico pra QA testar headless.
-  dragObjectTo(sceneId, targetXZ) {
-    const obj = getUserObjects().find(o => o.userData?.sceneId === sceneId);
-    if (!obj) throw new Error(`objeto nao encontrado: ${sceneId}`);
-    const pos = cgDragObjectTo(obj, targetXZ, userRoot);
-    return { sceneId, position: pos.toArray() };
+  //
+  // CR-11 (wave-b, 2026-05-21): valida input. Rejeita x/z não-finitos pra
+  // mascarar bug do chamador (NaN, null, undefined entrariam via `?? 0`).
+  // QA-3: aceita `name` além de sceneId, espelhando selectByName.
+  dragObjectTo(idOrName, targetXZ) {
+    if (idOrName == null) throw new Error('dragObjectTo: idOrName obrigatorio');
+    if (!targetXZ || typeof targetXZ !== 'object') {
+      throw new Error('dragObjectTo: targetXZ obrigatorio ({x, z})');
+    }
+    const x = targetXZ.x;
+    const z = targetXZ.z;
+    if (!Number.isFinite(x) || !Number.isFinite(z)) {
+      throw new Error(`dragObjectTo: x/z must be finite numbers (recebido x=${x}, z=${z})`);
+    }
+    const users = getUserObjects();
+    // primeira tentativa: sceneId. fallback: name (QA-3).
+    let obj = users.find(o => o.userData?.sceneId === idOrName);
+    if (!obj && typeof idOrName === 'string') {
+      obj = users.find(o => o.name === idOrName);
+    }
+    if (!obj) throw new Error(`objeto nao encontrado: ${idOrName}`);
+    // garante que o objeto está registrado no physics store antes de prosseguir
+    if (!physics.getAABB(obj)) {
+      throw new Error(`objeto nao registrado em physics: ${idOrName}`);
+    }
+    const pos = cgDragObjectTo(obj, { x, z }, userRoot);
+    return { sceneId: obj.userData?.sceneId || null, position: pos.toArray() };
   },
 
   // Fase 3: footprint editavel via API. valida w,d inteiros >= 1.
@@ -353,17 +386,18 @@ const state = {
 
   // D.5: state getter pro surface-snap
   surfaceSnapEnabled() { return snap.isSurfaceSnapEnabled(); },
+  // CR-9: isFreeTransform centralizado em state-helpers.js.
   isObjectFreeTransform(sceneId) {
     const obj = getUserObjects().find(o => o.userData?.sceneId === sceneId);
     if (!obj) return null;
-    return !!obj.userData.freeTransform;
+    return isFreeTransform(obj);
   },
 
   // D.3: isLocked é o inverso de freeTransform — leitura natural pra QA
   isLocked(sceneId) {
     const obj = getUserObjects().find(o => o.userData?.sceneId === sceneId);
     if (!obj) return null;
-    return !obj.userData.freeTransform;
+    return !isFreeTransform(obj);
   },
 
   // D.1/D.2: retorna AABB atual do objeto (min/max como arrays)

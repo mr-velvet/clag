@@ -2,6 +2,11 @@ import {
   scene, bootViewport, on, setGizmoMode, getGizmoMode,
   getSelected, setSelected, removeFromScene, duplicateObject,
   notifySceneChanged, userRoot, addToScene,
+  // CR-12 (wave-b2, 2026-05-21): helper único pra sincronizar pós-mutação
+  // em batch (load, restore, boot inicial). Substitui o par
+  // `scene.updateMatrixWorld(true) + physics.registerAll(userRoot)` que estava
+  // duplicado em 3 call sites — drift fácil de erro de ordem.
+  syncSceneAfterMutation,
 } from './scene.js';
 import { addCube, addSphere, addPlane, addPointLight } from './primitives.js';
 import { initOutliner } from './outliner.js';
@@ -21,7 +26,8 @@ import { providerMap } from './providers/index.js';
 import { initApi } from './api.js';
 import { createRoom, removeRoom, getRoomDimensions, hasRoom } from './room.js';
 import { initContextualGizmo } from './contextual-gizmo.js';
-import * as physics from './physics.js';
+// CR-12: physics não é mais importado direto — syncSceneAfterMutation em scene.js
+// encapsula registerAll. Mantém main.js mais magro e desacopla do store de física.
 import * as THREE from 'three';
 
 const $ = id => document.getElementById(id);
@@ -173,10 +179,8 @@ $('btn-save').addEventListener('click', () => {
 $('btn-load').addEventListener('click', async () => {
   const ok = await restoreSceneFromLocal(addPrimitiveByKind, downloadAndPlaceFromMeta);
   if (ok) {
-    // Fix Bug 13: após load, matrizes world podem estar stale — atualiza antes
-    // de re-registrar todos os AABBs. Sem isso, AABBs ficam todos na posição errada.
-    scene.updateMatrixWorld(true);
-    physics.registerAll(userRoot);
+    // CR-12: syncSceneAfterMutation faz updateMatrixWorld + registerAll na ordem certa.
+    syncSceneAfterMutation();
     toast('cena carregada', { kind: 'success' });
   } else {
     toast('nenhuma cena salva', { kind: 'warn' });
@@ -410,22 +414,48 @@ const appEl = document.getElementById('app');
 $('toggle-left').addEventListener('click', () => appEl.classList.toggle('no-left'));
 $('toggle-right').addEventListener('click', () => appEl.classList.toggle('no-right'));
 
-// cena starter — plane grande chão + cubo + esfera, pra dar sinal de vida no boot
-const ground = addPlane();
-ground.scale.set(2.5, 1, 2.5);  // 20x20
-ground.name = 'Ground';
-// D.3: grid snap agora é OFF por default (surface-snap é o novo default).
-// addToScene já chama applySnapToObject, que respeita o novo DEFAULT_ENABLED=false.
-const cube = addCube();
-cube.position.set(-1.5, 0.5, 0);
-const sphere = addSphere();
-sphere.position.set(1.5, 0.6, 0);
+// DEBT-2 (wave-b2, 2026-05-21): auto-load da cena salva no boot.
+// Antes o user sempre clicava Load mesmo tendo cena salva (violava Princípio 7).
+// Lógica:
+//   1. Cria starter scene (plane + cube + sphere) como fallback visual imediato.
+//   2. Se localStorage tem `clag:scene-v1`, tenta restaurar. Restore limpa o
+//      starter e repopula. Em falha (JSON corrompido), starter fica como está.
+//   3. Toast informa qual fluxo aconteceu — important pro user perceber.
+function _buildStarterScene() {
+  const ground = addPlane();
+  ground.scale.set(2.5, 1, 2.5);  // 20x20
+  ground.name = 'Ground';
+  // D.3: grid snap agora é OFF por default (surface-snap é o novo default).
+  // addToScene já chama applySnapToObject, que respeita o novo DEFAULT_ENABLED=false.
+  const cube = addCube();
+  cube.position.set(-1.5, 0.5, 0);
+  const sphere = addSphere();
+  sphere.position.set(1.5, 0.6, 0);
+}
 
-// Fix Bug 13: updateMatrixWorld antes de registerAll garante que setFromObject
-// usa matrices world atualizadas — sem isso, todos os AABBs ficam na posição
-// do primeiro objeto (matrix stale pré-primeiro-render).
-scene.updateMatrixWorld(true);
-physics.registerAll(userRoot);
+_buildStarterScene();
+
+// CR-12: syncSceneAfterMutation centraliza o par updateMatrixWorld + registerAll.
+// Sem isso, todos os AABBs ficariam na posição do primeiro objeto (matrix stale
+// pré-primeiro-render).
+syncSceneAfterMutation();
+
+// DEBT-2: tenta restaurar cena salva. restoreSceneFromLocal limpa o userRoot
+// antes de hidratar, então o starter scene some se houver save. Em erro de
+// parse/restore, registra warning e mantém starter — não derruba o boot.
+(async () => {
+  try {
+    const ok = await restoreSceneFromLocal(addPrimitiveByKind, downloadAndPlaceFromMeta);
+    if (ok) {
+      syncSceneAfterMutation();
+      toast('cena anterior carregada', { kind: 'success' });
+    }
+    // se !ok (sem save), starter scene fica visível — sem toast (boot limpo)
+  } catch (err) {
+    console.warn('[clag] auto-load falhou; usando cena starter', err);
+    toast('falha ao restaurar cena salva — usando starter', { kind: 'warn' });
+  }
+})();
 
 // deseleciona pra inspector mostrar "nenhum objeto selecionado" no boot
 setSelected(null);
@@ -441,9 +471,9 @@ initApi({
   getActiveProvider,
   save: () => saveSceneToLocal(),
   load: async () => {
-    // Fix Bug 13: mesma lógica do btn-load — updateMatrixWorld + registerAll pós-restore.
+    // CR-12: syncSceneAfterMutation faz updateMatrixWorld + registerAll na ordem certa.
     const ok = await restoreSceneFromLocal(addPrimitiveByKind, downloadAndPlaceFromMeta);
-    if (ok) { scene.updateMatrixWorld(true); physics.registerAll(userRoot); }
+    if (ok) syncSceneAfterMutation();
     return ok;
   },
   // catalogo

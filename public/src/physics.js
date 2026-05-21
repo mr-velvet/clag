@@ -19,12 +19,29 @@
 //   - Objeto completamente cercado não tem saída automática (cadeado libera)
 
 import * as THREE from 'three';
+// CR-13 (wave-b2, 2026-05-21): _isRoomPart compartilhado em state-helpers.js
+// (estava duplicado aqui e em contextual-gizmo.js — drift garantido).
+import { isRoomPart as _isRoomPart } from './state-helpers.js';
 
 // sceneId -> { obj, box: THREE.Box3 }
 const _store = new Map();
 
 // tolerância pra evitar auto-colisão por imprecisão numérica
 const TOLERANCE = 0.01;
+
+// CR-5/6 (wave-b, 2026-05-21): instâncias reutilizáveis no hot path.
+// surfaceUnder e sweepXZ rodam até 32x por pointermove (sub-steps). Antes
+// alocavam Vector3/Box3/Raycaster a cada chamada — pressão de GC severa em
+// drags rápidos. Agora reusamos as mesmas instâncias module-level.
+const _rcOrigin       = new THREE.Vector3();
+const _rcDir          = new THREE.Vector3(0, -1, 0);
+const _rcRay          = new THREE.Raycaster();
+_rcRay.near = 0.001;
+_rcRay.far  = 500;
+const _sweepCenter    = new THREE.Vector3();
+const _sweepCandidate = new THREE.Box3();
+const _sweepOtherExp  = new THREE.Box3();
+const _sweepOutPos    = new THREE.Vector3();
 
 // -------------------- registro --------------------
 
@@ -82,16 +99,10 @@ export function registerAll(userRoot) {
 // Lógica: posiciona rayo de cima pra baixo. Hit em outro objeto -> Y = hit.point.y.
 // Se não há hit -> Y = 0 (chão lógico).
 export function surfaceUnder(obj, targetXZ, userRoot) {
-  const myId = obj?.userData?.sceneId;
-
-  // calcula meio AABB do objeto pra saber a altura dele
-  const myBox = _store.get(myId)?.box;
-  const objHeight = myBox ? (myBox.max.y - myBox.min.y) : 1;
-
-  // origem do raio: ponto XZ alvo, altura bem acima
-  const origin = new THREE.Vector3(targetXZ.x, 200, targetXZ.z);
-  const dir    = new THREE.Vector3(0, -1, 0);
-  const ray    = new THREE.Raycaster(origin, dir, 0.001, 500);
+  // CR-6 (wave-b, 2026-05-21): reusa Raycaster/Vector3 module-level em vez de
+  // alocar a cada chamada. Set origin/dir via .set() no singleton.
+  _rcOrigin.set(targetXZ.x, 200, targetXZ.z);
+  _rcRay.set(_rcOrigin, _rcDir);
 
   // candidatos: todos em userRoot excluindo o próprio e room:floor
   const candidates = [];
@@ -103,7 +114,7 @@ export function surfaceUnder(obj, targetXZ, userRoot) {
     candidates.push(child);
   }
 
-  const hits = ray.intersectObjects(candidates, true);
+  const hits = _rcRay.intersectObjects(candidates, true);
   if (hits.length === 0) {
     // sem hit -> Y = 0 (chão lógico), objeto planta no chão
     return { y: 0, hitObj: null };
@@ -117,12 +128,11 @@ export function surfaceUnder(obj, targetXZ, userRoot) {
 // -------------------- sweep XZ + yOverlap (D.2 + D.4) --------------------
 
 // Testa posição candidata de `obj` contra todos os outros AABBs.
-// Retorna a posição final no plano XZ (sem mudar Y) — pode ser a posição
-// clamped caso haja colisão (slide pela face de colisão).
 //
-// D.5: o vetor retornado tem `blocked: boolean` anexado (`.blocked` no Vector3).
-// `true` quando alguma colisão fez o slide deslocar o resultado em relação ao
-// `targetPos` original — usado pelo gizmo pra trocar o cursor pra `not-allowed`.
+// CR-8 (wave-b, 2026-05-21): retorna `{ position: Vector3, blocked: boolean }`
+// em vez de mutar Vector3 com prop `.blocked`. Vector3 retornado é uma
+// INSTÂNCIA REUTILIZADA module-level (_sweepOutPos) — chamador que precisa
+// manter a posição entre frames DEVE clonar.
 //
 // Algoritmo simples de slide:
 //   1. Calcula AABB candidato (translada AABB atual pra targetPos)
@@ -137,39 +147,39 @@ export function surfaceUnder(obj, targetXZ, userRoot) {
 // — empilhamento e travessia aérea funcionam naturalmente.
 export function sweepXZ(obj, targetPos, userRoot, opts = {}) {
   const myId = obj?.userData?.sceneId;
-  if (!myId) return targetPos.clone();
+  if (!myId) {
+    _sweepOutPos.copy(targetPos);
+    return { position: _sweepOutPos, blocked: false };
+  }
 
   const myEntry = _store.get(myId);
-  if (!myEntry) return targetPos.clone();
+  if (!myEntry) {
+    _sweepOutPos.copy(targetPos);
+    return { position: _sweepOutPos, blocked: false };
+  }
 
-  // AABB candidato: desloca do centro atual -> centro target no plano XZ
-  const currentCenter = new THREE.Vector3();
-  myEntry.box.getCenter(currentCenter);
+  // CR-5/8: reusa _sweepCenter/_sweepCandidate module-level. AABB candidato
+  // = AABB atual deslocado pro centro target no plano XZ.
+  myEntry.box.getCenter(_sweepCenter);
+  const deltaX = targetPos.x - _sweepCenter.x;
+  const deltaZ = targetPos.z - _sweepCenter.z;
 
-  const delta = new THREE.Vector3(
-    targetPos.x - currentCenter.x,
-    0, // Y é controlado externamente — translação Y vem via opts.candidateY (D.4)
-    targetPos.z - currentCenter.z,
-  );
-
-  // clona o box e desloca XZ
-  const candidateBox = myEntry.box.clone();
-  candidateBox.min.x += delta.x;
-  candidateBox.max.x += delta.x;
-  candidateBox.min.z += delta.z;
-  candidateBox.max.z += delta.z;
+  _sweepCandidate.copy(myEntry.box);
+  _sweepCandidate.min.x += deltaX;
+  _sweepCandidate.max.x += deltaX;
+  _sweepCandidate.min.z += deltaZ;
+  _sweepCandidate.max.z += deltaZ;
 
   // D.4: se chamador informou candidateY (Y onde o pivot do obj VAI ficar
   // pós-surface-snap), translada o AABB em Y antes do teste de overlap.
   // Sem isso, yOverlap usa o Y atual do obj (frame anterior) e bloqueia
-  // empilhamento. baseOffset = pivot - aabb.min.y; aabb.min.y candidato =
-  // candidateY - baseOffset; deltaY = aabb.min.y candidato - aabb.min.y atual.
+  // empilhamento.
   if (typeof opts.candidateY === 'number') {
     const baseOffset = obj.position.y - myEntry.box.min.y;
     const candidateMinY = opts.candidateY - baseOffset;
     const deltaY = candidateMinY - myEntry.box.min.y;
-    candidateBox.min.y += deltaY;
-    candidateBox.max.y += deltaY;
+    _sweepCandidate.min.y += deltaY;
+    _sweepCandidate.max.y += deltaY;
   }
 
   // resultado final começa em targetPos e vai sendo corrigido
@@ -192,72 +202,68 @@ export function sweepXZ(obj, targetPos, userRoot, opts = {}) {
     // expand other por tolerância em XZ pra evitar self-stick.
     // Em Y a tolerância vai pro outro lado (encolhe), pra permitir que
     // objetos ENCOSTEM verticalmente (empilhamento) sem o sistema considerar
-    // overlap. Sem isso, base do topo tangencia topo do base e bloqueia.
-    const otherExp = other.clone();
-    otherExp.min.x -= TOLERANCE;
-    otherExp.min.z -= TOLERANCE;
-    otherExp.max.x += TOLERANCE;
-    otherExp.max.z += TOLERANCE;
-    otherExp.min.y += TOLERANCE;
-    otherExp.max.y -= TOLERANCE;
+    // overlap. CR-5: reusa _sweepOtherExp module-level.
+    _sweepOtherExp.copy(other);
+    _sweepOtherExp.min.x -= TOLERANCE;
+    _sweepOtherExp.min.z -= TOLERANCE;
+    _sweepOtherExp.max.x += TOLERANCE;
+    _sweepOtherExp.max.z += TOLERANCE;
+    _sweepOtherExp.min.y += TOLERANCE;
+    _sweepOtherExp.max.y -= TOLERANCE;
 
     // D.4: intersecção nos 3 eixos. Sem overlap em Y -> objeto passa por
-    // cima/baixo sem colidir (empilhamento, travessia aérea). candidateBox.min.y
-    // / max.y refletem o Y candidato (pós-surface-snap) injetado via opts.candidateY.
-    const xOverlap = candidateBox.min.x < otherExp.max.x && candidateBox.max.x > otherExp.min.x;
-    const zOverlap = candidateBox.min.z < otherExp.max.z && candidateBox.max.z > otherExp.min.z;
-    const yOverlap = candidateBox.min.y < otherExp.max.y && candidateBox.max.y > otherExp.min.y;
+    // cima/baixo sem colidir (empilhamento, travessia aérea).
+    const xOverlap = _sweepCandidate.min.x < _sweepOtherExp.max.x && _sweepCandidate.max.x > _sweepOtherExp.min.x;
+    const zOverlap = _sweepCandidate.min.z < _sweepOtherExp.max.z && _sweepCandidate.max.z > _sweepOtherExp.min.z;
+    const yOverlap = _sweepCandidate.min.y < _sweepOtherExp.max.y && _sweepCandidate.max.y > _sweepOtherExp.min.y;
     if (!xOverlap || !zOverlap || !yOverlap) continue;
 
     // há colisão — calcula penetração em X e Z
     const penX = Math.min(
-      candidateBox.max.x - otherExp.min.x,
-      otherExp.max.x - candidateBox.min.x,
+      _sweepCandidate.max.x - _sweepOtherExp.min.x,
+      _sweepOtherExp.max.x - _sweepCandidate.min.x,
     );
     const penZ = Math.min(
-      candidateBox.max.z - otherExp.min.z,
-      otherExp.max.z - candidateBox.min.z,
+      _sweepCandidate.max.z - _sweepOtherExp.min.z,
+      _sweepOtherExp.max.z - _sweepCandidate.min.z,
     );
 
     // slide pelo eixo com MENOR penetração (mais fácil de escapar)
     if (penX <= penZ) {
       // slide em X: empurra pra fora no eixo X
-      const pushX = (candidateBox.min.x + candidateBox.max.x) / 2 < (otherExp.min.x + otherExp.max.x) / 2
+      const pushX = (_sweepCandidate.min.x + _sweepCandidate.max.x) / 2 < (_sweepOtherExp.min.x + _sweepOtherExp.max.x) / 2
         ? -(penX + TOLERANCE)
         : (penX + TOLERANCE);
       finalX += pushX;
-      candidateBox.min.x += pushX;
-      candidateBox.max.x += pushX;
+      _sweepCandidate.min.x += pushX;
+      _sweepCandidate.max.x += pushX;
     } else {
       // slide em Z
-      const pushZ = (candidateBox.min.z + candidateBox.max.z) / 2 < (otherExp.min.z + otherExp.max.z) / 2
+      const pushZ = (_sweepCandidate.min.z + _sweepCandidate.max.z) / 2 < (_sweepOtherExp.min.z + _sweepOtherExp.max.z) / 2
         ? -(penZ + TOLERANCE)
         : (penZ + TOLERANCE);
       finalZ += pushZ;
-      candidateBox.min.z += pushZ;
-      candidateBox.max.z += pushZ;
+      _sweepCandidate.min.z += pushZ;
+      _sweepCandidate.max.z += pushZ;
     }
     blocked = true;
   }
 
-  const out = new THREE.Vector3(finalX, targetPos.y, finalZ);
-  // D.5: anexa flag pro caller saber se o sweep mexeu na posição. Não usamos
-  // sub-classe (Vector3 já é referência ok) — só uma prop extra no objeto.
-  out.blocked = blocked;
-  return out;
+  // CR-8: retorno tipado. Vector3 reaproveitado — caller que persistir entre
+  // frames deve clonar (call sites em contextual-gizmo.js leem .x/.z na hora).
+  _sweepOutPos.set(finalX, targetPos.y, finalZ);
+  return { position: _sweepOutPos, blocked };
 }
 
 // -------------------- helpers --------------------
 
+// CR-14 (wave-b2, 2026-05-21): removida a branch morta `if (_isRoomPart) return false`
+// — ela já cai no `return false` abaixo de qualquer jeito (era no-op).
+// Helper segue mínimo: só helpers são puláveis; room parts SÃO registrados
+// pro sweep enxergar paredes (mas surfaceUnder/sweep XZ os ignoram via filtro próprio).
 function _shouldSkip(obj) {
   if (obj.userData?.isHelper) return true;
-  if (_isRoomPart(obj)) return false; // registra room:wall/floor/ceiling pro sweep funcionar
   return false;
-}
-
-function _isRoomPart(obj) {
-  const kind = obj?.userData?.kind || '';
-  return kind.startsWith('room:');
 }
 
 function _isFloor(obj) {

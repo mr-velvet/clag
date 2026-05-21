@@ -31,6 +31,10 @@ import {
 } from './scene.js';
 import * as physics from './physics.js';
 import { applyAnchor } from './search.js';
+// CR-9/CR-13 (wave-b2, 2026-05-21): predicados compartilhados.
+// `isFreeTransform` substitui consulta inconsistente em ~5 sites; `isRoomPart`
+// substitui a versão duplicada local (que estava idêntica à de physics.js).
+import { isFreeTransform, isRoomPart } from './state-helpers.js';
 
 // -------------------- estado interno --------------------
 
@@ -65,6 +69,19 @@ const _pointer = new THREE.Vector2();
 const _lockBox = new THREE.Box3();
 const _lockCenter = new THREE.Vector3();
 const _lockNdc = new THREE.Vector3();
+
+// CR-5 (wave-b, 2026-05-21): instâncias reutilizáveis no hot path de drag.
+// _onPointerMove + sub-steps alocavam ~3 Vector3 + 1 Box3 por frame x 32 steps.
+// Box3 só é setado quando precisamos do baseOffset — agora baseado em cache
+// (_dragBaseOffset) populado em _dragStart, sem alocação por step.
+const _dragSub        = new THREE.Vector3();
+const _dragTargetXZ   = new THREE.Vector3();
+const _dragFromXZ     = new THREE.Vector3();
+const _dragStepProbe  = new THREE.Vector3();
+const _dragBox        = new THREE.Box3();
+// baseOffset = obj.position.y - obj.AABB.min.y. Cache por drag (constante
+// enquanto o objeto não muda de escala/geometria — bom o suficiente em drag).
+let _dragBaseOffset = 0;
 
 // modo contextual global — usado por api.js pra saber o modo
 let _contextualMode = true;
@@ -179,7 +196,8 @@ function _buildTooltip() {
 }
 
 function _updateTooltipForLock(sel) {
-  const locked = !sel.userData?.freeTransform;
+  // CR-9: isFreeTransform centraliza a consulta (`=== true` em vez de truthy).
+  const locked = !isFreeTransform(sel);
   _tooltipEl.textContent = locked
     ? '🔒 ancorado à superfície (clique pra liberar)'
     : '🔓 livre (clique pra ancorar)';
@@ -219,8 +237,9 @@ function _updateHintVisibility() {
   if (seen) { _hintEl.classList.add('hidden'); return; }
 
   // mostra apenas quando: tem objetos na cena E nenhum está selecionado
+  // CR-13: isRoomPart vem de state-helpers.js.
   const hasObjects = userRoot.children.some(c =>
-    !c.userData?.isHelper && !_isRoomPart(c),
+    !c.userData?.isHelper && !isRoomPart(c),
   );
   const noSel = !getSelected();
   _hintEl.classList.toggle('hidden', !(hasObjects && noSel));
@@ -297,7 +316,8 @@ function _updateLockOverlay() {
   const sx = (_lockNdc.x * 0.5 + 0.5) * rect.width  + rect.left;
   const sy = (-_lockNdc.y * 0.5 + 0.5) * rect.height + rect.top;
 
-  const locked = !sel.userData?.freeTransform;
+  // CR-9: isFreeTransform centralizado.
+  const locked = !isFreeTransform(sel);
   _lockEl.textContent = locked ? '🔒' : '🔓';
   _lockEl.classList.toggle('hidden', false);
   _lockEl.classList.toggle('unlocked', !locked);
@@ -318,7 +338,8 @@ export function toggleLock(obj) {
 }
 
 function _toggleLock(obj) {
-  const wasLocked = !obj.userData?.freeTransform;
+  // CR-9: usa isFreeTransform.
+  const wasLocked = !isFreeTransform(obj);
   obj.userData.freeTransform = wasLocked; // se estava travado, libera; e vice-versa
   notifySceneChanged();
   // atualiza visual imediatamente
@@ -343,8 +364,9 @@ function _onPointerDown(ev) {
   _raycaster.setFromCamera(_pointer, camera);
 
   // candidatos: userRoot, excluindo helpers e room:*
+  // CR-13: isRoomPart vem de state-helpers.js.
   const candidates = userRoot.children.filter(c =>
-    !c.userData?.isHelper && !_isRoomPart(c),
+    !c.userData?.isHelper && !isRoomPart(c),
   );
   const hits = _raycaster.intersectObjects(candidates, true);
 
@@ -386,7 +408,8 @@ function _onPointerMove(ev) {
     _dragCommitted = true;
 
     // verifica se objeto está liberado (freeTransform) — se sim, não faz drag contextual
-    if (_dragObj.userData?.freeTransform) {
+    // CR-9: isFreeTransform centraliza a consulta.
+    if (isFreeTransform(_dragObj)) {
       // objeto liberado: deixa TransformControls cuidar, não inicia drag
       _dragObj = null;
       _pointerDownPos = null;
@@ -397,6 +420,7 @@ function _onPointerMove(ev) {
     _isDragging = true;
     _dragOrigin = _dragObj.position.clone();
     _lastTargetXZ = _dragObj.position.clone(); // baseline pra tunneling
+    _captureDragBaseOffset(_dragObj); // CR-5: cacheia baseOffset uma vez/drag
     orbit.enabled = false;
     if (_container) _container.classList.add('grabbing');
     renderer.domElement.style.cursor = 'grabbing';
@@ -408,8 +432,9 @@ function _onPointerMove(ev) {
   if (!_contextualMode) { _endDrag(); return; } // W/E/R assumiu
 
   // calcula ponto no plano XZ sob o cursor
+  // CR-5: reusa _dragTargetXZ module-level em vez de alocar Vector3.
   const worldPoint = worldPointAtScreen(ev.clientX, ev.clientY);
-  const targetXZ = new THREE.Vector3(worldPoint.x, 0, worldPoint.z);
+  _dragTargetXZ.set(worldPoint.x, 0, worldPoint.z);
 
   // D.5 — tunneling mitigation: se o delta entre frames é grande (>0.25u em XZ),
   // divide em sub-steps pra que o sweep XZ rode em cada passo intermediário.
@@ -422,28 +447,30 @@ function _onPointerMove(ev) {
   //   - Surface-snap continua só no step final, mas agora protegido por
   //     clamp XZ com Y atual ANTES de aplicar (ver _applyDragStep).
   //   - Anchor=ceiling/wall bypassa surface-snap (Patch QA-2).
-  const stepsXZ = _calcSubSteps(_lastTargetXZ, targetXZ);
+  const stepsXZ = _calcSubSteps(_lastTargetXZ, _dragTargetXZ);
   const fixedY = _dragObj.position.y;
   let lastBlocked = false;
   for (let i = 1; i <= stepsXZ; i++) {
     const t = i / stepsXZ;
-    const sub = new THREE.Vector3(
-      _lastTargetXZ.x + (targetXZ.x - _lastTargetXZ.x) * t,
+    // CR-5: reusa _dragSub em vez de alocar Vector3 a cada sub-step.
+    _dragSub.set(
+      _lastTargetXZ.x + (_dragTargetXZ.x - _lastTargetXZ.x) * t,
       0,
-      _lastTargetXZ.z + (targetXZ.z - _lastTargetXZ.z) * t,
+      _lastTargetXZ.z + (_dragTargetXZ.z - _lastTargetXZ.z) * t,
     );
     const isFinal = (i === stepsXZ);
-    const stepBlocked = _applyDragStep(_dragObj, sub, { snapSurface: isFinal, fixedY });
+    const stepBlocked = _applyDragStep(_dragObj, _dragSub, { snapSurface: isFinal, fixedY });
     lastBlocked = stepBlocked || lastBlocked;
     if (!isFinal && stepBlocked) {
       // Aborta sub-steps subsequentes ao detectar bloqueio e roda
       // surface-snap na posição corrente. Evita que slide com penetração
       // total teleporte o objeto pro outro lado do obstáculo.
-      _applyDragStep(_dragObj, new THREE.Vector3(_dragObj.position.x, 0, _dragObj.position.z), { snapSurface: true });
+      _dragStepProbe.set(_dragObj.position.x, 0, _dragObj.position.z);
+      _applyDragStep(_dragObj, _dragStepProbe, { snapSurface: true });
       break;
     }
   }
-  _lastTargetXZ = targetXZ.clone();
+  _lastTargetXZ.copy(_dragTargetXZ);
 
   // D.5 — cursor not-allowed durante slide (algum sub-step bloqueou)
   if (lastBlocked) {
@@ -482,36 +509,45 @@ function _applyDragStep(obj, targetXZ, opts = {}) {
     // resultou no target (sem bloqueio). Sem esse guard, surface-snap subia o
     // objeto pro topo do obstáculo e o sweep liberava (yOverlap=false → cola
     // por cima). Fix QA-1: bloqueio horizontal venceria empilhamento por drag.
+    //
+    // CR-8: sweepXZ retorna { position, blocked } — leitura via .position.x/z.
     const currentY = obj.position.y;
     const probe = physics.sweepXZ(obj, targetXZ, userRoot, { candidateY: currentY });
-    const blockedHorizontal = !!probe.blocked;
 
-    if (blockedHorizontal) {
+    if (probe.blocked) {
       // Mantém Y atual no XZ clampeado pelo sweep — não escala obstáculo.
       finalY = currentY;
-      obj.position.set(probe.x, finalY, probe.z);
+      obj.position.set(probe.position.x, finalY, probe.position.z);
       physics.update(obj);
       return true;
     }
 
     // XZ livre nesse Y: surface-snap pode rebaixar/elevar com segurança.
+    // CR-5: usa _dragBaseOffset cacheado no _dragStart, evitando Box3 por step.
     const surface = physics.surfaceUnder(obj, targetXZ, userRoot);
-    const currentBox = new THREE.Box3().setFromObject(obj);
-    const baseOffset = obj.position.y - currentBox.min.y;
-    finalY = (surface ? surface.y : 0) + baseOffset;
+    finalY = (surface ? surface.y : 0) + _dragBaseOffset;
   } else {
     // Step intermediário OU anchor=ceiling/wall: Y herdado, sem surface-snap.
     finalY = (opts.fixedY != null) ? opts.fixedY : obj.position.y;
   }
 
-  // sweep XZ — anti-overlap (D.2 + D.4 yOverlap).
+  // sweep XZ — anti-overlap (D.2 + D.4 yOverlap). CR-8 novo retorno.
   const swept = physics.sweepXZ(obj, targetXZ, userRoot, { candidateY: finalY });
-
-  obj.position.set(swept.x, finalY, swept.z);
+  obj.position.set(swept.position.x, finalY, swept.position.z);
   physics.update(obj);
 
-  // D.5: sweep agora retorna .blocked — propagamos pra cima pra cursor not-allowed
   return !!swept.blocked;
+}
+
+// CR-5 (wave-b, 2026-05-21): captura baseOffset uma vez por drag.
+// baseOffset = obj.position.y - obj.AABB.min.y = distância do pivot até a
+// base do AABB. Constante enquanto o objeto não muda escala/geometria
+// (verdade durante drag). Antes era recalculado via `new Box3().setFromObject`
+// em CADA sub-step — Box3.setFromObject é O(meshes) e aloca por chamada.
+function _captureDragBaseOffset(obj) {
+  if (!obj) { _dragBaseOffset = 0; return; }
+  _dragBox.setFromObject(obj);
+  _dragBaseOffset = obj.position.y - _dragBox.min.y;
 }
 
 // D.5 — decide quantos sub-steps usar baseado no delta XZ
@@ -592,8 +628,9 @@ function _updateHoverCursor(ev) {
   _pointer.y = -((ev.clientY - rect.top)  / rect.height) * 2 + 1;
   _raycaster.setFromCamera(_pointer, camera);
 
+  // CR-13: isRoomPart vem de state-helpers.js.
   const candidates = userRoot.children.filter(c =>
-    !c.userData?.isHelper && !_isRoomPart(c),
+    !c.userData?.isHelper && !isRoomPart(c),
   );
   const hits = _raycaster.intersectObjects(candidates, true);
 
@@ -607,7 +644,8 @@ function _updateHoverCursor(ev) {
   while (hitObj.parent && hitObj.parent !== userRoot) hitObj = hitObj.parent;
 
   // cursor grab se travado (drag contextual disponível), default se liberado
-  if (!hitObj.userData?.freeTransform) {
+  // CR-9: isFreeTransform centralizado.
+  if (!isFreeTransform(hitObj)) {
     renderer.domElement.style.cursor = 'grab';
   } else {
     renderer.domElement.style.cursor = 'default';
@@ -632,16 +670,21 @@ function _updateHoverCursor(ev) {
 // dragObjectTo de (-5,0,0) → (5,0,0) com colisor em (0,0,0) atravessava direto.
 export function dragObjectTo(obj, targetXZ, userRoot_) {
   const root = userRoot_ || userRoot;
-  const target = new THREE.Vector3(targetXZ.x ?? 0, 0, targetXZ.z ?? 0);
+  // CR-5: reusa _dragTargetXZ. CR-11: api.js já validou x/z finitos antes.
+  _dragTargetXZ.set(targetXZ.x ?? 0, 0, targetXZ.z ?? 0);
 
   // Fix Bug 12: freeTransform=true → move livremente, sem sweep nem surface.
   // Simetria com drag visual (que aborta antes de iniciar o drag contextual).
-  if (obj.userData?.freeTransform === true) {
-    obj.position.set(target.x, obj.position.y, target.z);
+  // CR-9: isFreeTransform centraliza a consulta (`=== true` estrito).
+  if (isFreeTransform(obj)) {
+    obj.position.set(_dragTargetXZ.x, obj.position.y, _dragTargetXZ.z);
     physics.update(obj);
     notifySceneChanged();
     return obj.position.clone();
   }
+
+  // CR-5: cacheia baseOffset uma vez antes do loop de sub-steps.
+  _captureDragBaseOffset(obj);
 
   // D.5 tunneling mitigation + patch QA-1 (wave-a1, 2026-05-21):
   //   - Removido o atalho `isStackingTarget` (era teleport pra topo de outro
@@ -650,20 +693,21 @@ export function dragObjectTo(obj, targetXZ, userRoot_) {
   //   - Surface-snap só no step final; step final é protegido por clamp XZ
   //     no Y atual (ver _programmaticStep).
   //   - Anchor=ceiling/wall bypassa surface-snap (Patch QA-2).
-  const fromXZ = new THREE.Vector3(obj.position.x, 0, obj.position.z);
-  const steps = _calcSubSteps(fromXZ, target);
+  _dragFromXZ.set(obj.position.x, 0, obj.position.z);
+  const steps = _calcSubSteps(_dragFromXZ, _dragTargetXZ);
   const fixedY = obj.position.y;
   for (let i = 1; i <= steps; i++) {
     const t = i / steps;
-    const sub = new THREE.Vector3(
-      fromXZ.x + (target.x - fromXZ.x) * t,
+    _dragSub.set(
+      _dragFromXZ.x + (_dragTargetXZ.x - _dragFromXZ.x) * t,
       0,
-      fromXZ.z + (target.z - fromXZ.z) * t,
+      _dragFromXZ.z + (_dragTargetXZ.z - _dragFromXZ.z) * t,
     );
     const isFinal = (i === steps);
-    const result = _programmaticStep(obj, sub, root, { snapSurface: isFinal, fixedY });
+    const result = _programmaticStep(obj, _dragSub, root, { snapSurface: isFinal, fixedY });
     if (!isFinal && result?.blocked) {
-      _programmaticStep(obj, new THREE.Vector3(obj.position.x, 0, obj.position.z), root, { snapSurface: true });
+      _dragStepProbe.set(obj.position.x, 0, obj.position.z);
+      _programmaticStep(obj, _dragStepProbe, root, { snapSurface: true });
       break;
     }
   }
@@ -696,32 +740,28 @@ function _programmaticStep(obj, target, root, opts = {}) {
   if (snapSurface && !anchorBypass) {
     // Patch QA-1: clamp XZ no Y atual primeiro. Se bloqueou horizontalmente,
     // não sobe pra topo do obstáculo — fica preso no Y atual no XZ clampeado.
+    // CR-8: sweepXZ retorna { position, blocked }.
     const currentY = obj.position.y;
     const probe = physics.sweepXZ(obj, target, root, { candidateY: currentY });
     if (probe.blocked) {
-      obj.position.set(probe.x, currentY, probe.z);
+      obj.position.set(probe.position.x, currentY, probe.position.z);
       physics.update(obj);
       return { blocked: true };
     }
 
-    // XZ livre — pode aplicar surface-snap.
+    // XZ livre — pode aplicar surface-snap. CR-5: usa _dragBaseOffset cacheado.
     const surface = physics.surfaceUnder(obj, target, root);
-    const currentBox = new THREE.Box3().setFromObject(obj);
-    const baseOffset = obj.position.y - currentBox.min.y;
-    finalY = (surface ? surface.y : 0) + baseOffset;
+    finalY = (surface ? surface.y : 0) + _dragBaseOffset;
   } else {
     finalY = (opts.fixedY != null) ? opts.fixedY : obj.position.y;
   }
 
   const swept = physics.sweepXZ(obj, target, root, { candidateY: finalY });
-  obj.position.set(swept.x, finalY, swept.z);
+  obj.position.set(swept.position.x, finalY, swept.position.z);
   physics.update(obj);
   return { blocked: !!swept.blocked };
 }
 
 // -------------------- helpers --------------------
-
-function _isRoomPart(obj) {
-  const kind = obj?.userData?.kind || '';
-  return kind.startsWith('room:');
-}
+// CR-13 (wave-b2, 2026-05-21): `_isRoomPart` migrado pra state-helpers.js
+// — era idêntico ao de physics.js. Importado no topo do arquivo.

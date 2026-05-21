@@ -289,6 +289,15 @@ export function duplicateObject(obj) {
   clone.userData = { ...obj.userData, sceneId: makeId('obj') };
   clone.position.x += 1;
   userRoot.add(clone);
+  // CR-4 (wave-b2, 2026-05-21): registra AABB do clone no store de física.
+  // Antes faltava — clone duplicado entrava na cena mas ficava invisível pro
+  // sweep, então outros objetos podiam atravessá-lo durante drag. Atualizamos
+  // matrix world primeiro pra que setFromObject capture a posição já deslocada
+  // (+1 em X) em vez do AABB do original.
+  if (!clone.userData?.isHelper) {
+    clone.updateMatrixWorld(true);
+    physics.register(clone);
+  }
   emit('sceneChanged');
   setSelected(clone);
   return clone;
@@ -296,6 +305,20 @@ export function duplicateObject(obj) {
 
 export function getUserObjects() {
   return [...userRoot.children];
+}
+
+// CR-12 (wave-b2, 2026-05-21): helper único pra sincronizar estado pós-mutação
+// em batch (load, restore, qualquer reposicionamento massivo). Antes a sequência
+// `scene.updateMatrixWorld(true) + physics.registerAll(userRoot)` estava duplicada
+// em 3 call sites em main.js (Bug 13). Erro de uma só na ordem = AABBs todos
+// no lugar errado. Centralizar aqui evita drift.
+//
+// Ordem importa:
+//   1. updateMatrixWorld pra que setFromObject use matrizes world atualizadas
+//   2. registerAll pra recriar todos os AABBs no store de física
+export function syncSceneAfterMutation() {
+  scene.updateMatrixWorld(true);
+  physics.registerAll(userRoot);
 }
 
 export function frameSelected() {

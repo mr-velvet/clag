@@ -80,7 +80,7 @@ const LS_MIGRATION_V2 = 'clag:snap-migration-v2';
 
     const ss = localStorage.getItem(LS_SURFACE_SNAP);
     if (ss === 'true' || ss === 'false') _surfaceSnap = (ss === 'true');
-  } catch (_) { /* ignora — localStorage pode estar bloqueado */ }
+  } catch (err) { console.warn('[clag] snap loadFromStorage failed', err); }
 })();
 
 // -------------------- getters/setters --------------------
@@ -90,7 +90,7 @@ export function setEnabled(v) {
   const next = !!v;
   if (next === _enabled) return _enabled;
   _enabled = next;
-  try { localStorage.setItem(LS_ENABLED, _enabled ? 'true' : 'false'); } catch (_) {}
+  try { localStorage.setItem(LS_ENABLED, _enabled ? 'true' : 'false'); } catch (err) { console.warn('[clag] snap setEnabled persist failed', err); }
   emit();
   return _enabled;
 }
@@ -101,7 +101,7 @@ export function setGridSize(n) {
   if (!Number.isFinite(v) || v <= 0) throw new Error(`gridSize invalido: ${n}`);
   if (v === _gridSize) return _gridSize;
   _gridSize = v;
-  try { localStorage.setItem(LS_GRID, String(_gridSize)); } catch (_) {}
+  try { localStorage.setItem(LS_GRID, String(_gridSize)); } catch (err) { console.warn('[clag] snap setGridSize persist failed', err); }
   emit();
   return _gridSize;
 }
@@ -112,7 +112,7 @@ export function setRotStep(deg) {
   if (!Number.isFinite(v) || v <= 0 || v > 90) throw new Error(`rotStep invalido (precisa 0 < v <= 90): ${deg}`);
   if (v === _rotStep) return _rotStep;
   _rotStep = v;
-  try { localStorage.setItem(LS_ROT, String(_rotStep)); } catch (_) {}
+  try { localStorage.setItem(LS_ROT, String(_rotStep)); } catch (err) { console.warn('[clag] snap setRotStep persist failed', err); }
   emit();
   return _rotStep;
 }
@@ -123,7 +123,7 @@ export function setSurfaceSnapEnabled(v) {
   const next = !!v;
   if (next === _surfaceSnap) return _surfaceSnap;
   _surfaceSnap = next;
-  try { localStorage.setItem(LS_SURFACE_SNAP, _surfaceSnap ? 'true' : 'false'); } catch (_) {}
+  try { localStorage.setItem(LS_SURFACE_SNAP, _surfaceSnap ? 'true' : 'false'); } catch (err) { console.warn('[clag] snap setSurfaceSnapEnabled persist failed', err); }
   emit();
   return _surfaceSnap;
 }
