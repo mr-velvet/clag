@@ -21,6 +21,7 @@ import {
   getUserObjects, userRoot,
   worldPointAtScreen, renderer,
   notifySceneChanged,
+  gizmo,
 } from './scene.js';
 import { providers, providerMap, searchAll } from './providers/index.js';
 import { getTree, getLeaf, allLeaves } from './catalog.js';
@@ -60,7 +61,10 @@ const actions = {
       throw new Error(`modo invalido: ${mode}`);
     }
     if (mode === 'contextual') {
+      // Fix GIZMO-3: ao voltar pro modo contextual via API, desacopla TransformControls
+      // pra que o gizmo visual desapareça. Sem isso, gizmo fica visível sobreposto.
       setContextualMode(true);
+      if (gizmo) gizmo.detach();
     } else {
       setContextualMode(false);
       setGizmoMode(mode);

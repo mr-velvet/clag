@@ -46,11 +46,29 @@ export function on(event, cb) {
   return () => _subs.delete(cb);
 }
 
+const LS_MIGRATION_V2 = 'clag:snap-migration-v2';
+
 // boot — carrega de localStorage com fallback
 // Migração D.3: se clag:snap-enabled nunca foi gravado (boot zero), usa
 // DEFAULT_ENABLED=false (grid snap OFF) e DEFAULT_SURFACE_SNAP=true.
 (function loadFromStorage() {
   try {
+    // Fix GIZMO-2 (migração silenciosa v2): usuário com sessão pré-D.3 pode ter
+    // clag:snap-enabled='true' gravado (era o default antigo). Essa migration
+    // força o novo default (false) uma única vez, só se o usuário NÃO tinha
+    // desligado o snap por conta própria (i.e., o valor era 'true').
+    // Se já migrou antes (flag v2 presente), não re-migra.
+    if (!localStorage.getItem(LS_MIGRATION_V2)) {
+      const snapPrev = localStorage.getItem(LS_ENABLED);
+      if (snapPrev === 'true') {
+        // sessão pré-D.3 com grid-snap ON: empurra novo default (surface-snap).
+        // Usuário que tinha desligado por conta própria ('false') não é tocado.
+        localStorage.setItem(LS_ENABLED, 'false');
+        _enabled = false;
+      }
+      localStorage.setItem(LS_MIGRATION_V2, '1');
+    }
+
     const e = localStorage.getItem(LS_ENABLED);
     if (e === 'true' || e === 'false') _enabled = (e === 'true');
 

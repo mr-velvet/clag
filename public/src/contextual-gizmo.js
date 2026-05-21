@@ -22,6 +22,7 @@ import {
   getSelected, setSelected, notifySceneChanged, worldPointAtScreen,
 } from './scene.js';
 import * as physics from './physics.js';
+import { applyAnchor } from './search.js';
 
 // -------------------- estado interno --------------------
 
@@ -57,13 +58,18 @@ export function initContextualGizmo({ container }) {
   canvas.addEventListener('pointerup',   _onPointerUp);
   canvas.addEventListener('pointerleave', _onPointerLeave);
 
-  // Esc durante drag cancela
+  // Esc durante drag cancela; fora de drag restaura modo contextual
   window.addEventListener('keydown', ev => {
-    if (ev.key === 'Escape' && _isDragging) {
-      _cancelDrag();
+    if (ev.key === 'Escape') {
+      if (_isDragging) {
+        _cancelDrag();
+      } else {
+        // Fix GIZMO-3: Esc fora de drag restaura modo contextual.
+        // W/E/R ativam TransformControls e setam _contextualMode=false;
+        // Esc desfaz isso devolvendo o drag contextual como modo ativo.
+        _contextualMode = true;
+      }
     }
-    // W/E/R voltam pro modo contextual quando Esc sem drag (já tratado em scene.js)
-    // Aqui apenas garantimos que contextual-gizmo volta ao default
     if ((ev.key === 'w' || ev.key === 'W' ||
          ev.key === 'e' || ev.key === 'E' ||
          ev.key === 'r' || ev.key === 'R') &&
@@ -242,7 +248,13 @@ function _onPointerMove(ev) {
 
   // surface raycast — snap-to-surface (D.1)
   const surface  = physics.surfaceUnder(_dragObj, swept, userRoot);
-  const finalY   = surface ? surface.y : 0;
+
+  // Fix Bug 11: compensa offset entre pivot e base do bbox.
+  // surface.y indica onde a BASE do objeto deve ficar; o pivot pode estar
+  // no centro — sem compensar, o objeto afunda meia-altura na superfície.
+  const _currentBox = new THREE.Box3().setFromObject(_dragObj);
+  const _baseOffset = _dragObj.position.y - _currentBox.min.y; // pivot -> base
+  const finalY = (surface ? surface.y : 0) + _baseOffset;
 
   // aplica posição
   _dragObj.position.set(swept.x, finalY, swept.z);
@@ -257,6 +269,15 @@ function _onPointerUp(ev) {
   if (ev.button !== 0) return;
 
   if (_isDragging && _dragObj) {
+    // Fix GIZMO-1: re-aplica anchor de ceiling/wall após drag.
+    // surface-snap planta no chão objetos sem hit, quebrando lustres/fixações
+    // de teto. applyAnchor recalcula a posição correta (fallback 2.7m sem sala).
+    // Anchor 'floor' NÃO precisa — surface-snap já planta corretamente (Fix 1).
+    const anchor = _dragObj.userData?.anchor;
+    if (anchor === 'ceiling' || anchor === 'wall') {
+      applyAnchor(_dragObj, _dragObj.position.clone(), { silent: true });
+    }
+
     // commit final
     physics.update(_dragObj);
     notifySceneChanged();
@@ -336,11 +357,33 @@ export function dragObjectTo(obj, targetXZ, userRoot_) {
   const root = userRoot_ || userRoot;
   const target = new THREE.Vector3(targetXZ.x ?? 0, 0, targetXZ.z ?? 0);
 
+  // Fix Bug 12: freeTransform=true → move livremente, sem sweep nem surface.
+  // Simetria com drag visual (que aborta antes de iniciar o drag contextual).
+  if (obj.userData?.freeTransform === true) {
+    obj.position.set(target.x, obj.position.y, target.z);
+    physics.update(obj);
+    notifySceneChanged();
+    return obj.position.clone();
+  }
+
   const swept   = physics.sweepXZ(obj, target, root);
   const surface = physics.surfaceUnder(obj, swept, root);
-  const finalY  = surface ? surface.y : 0;
+
+  // Fix Bug 11: compensa offset entre pivot e base do bbox (mesma lógica do drag visual).
+  // surface.y é onde a BASE deve pousar; ajusta Y para que aabb.min.y caia exatamente aí.
+  const currentBox = new THREE.Box3().setFromObject(obj);
+  const baseOffset = obj.position.y - currentBox.min.y;
+  const finalY = (surface ? surface.y : 0) + baseOffset;
 
   obj.position.set(swept.x, finalY, swept.z);
+
+  // Fix GIZMO-1: re-aplica anchor de ceiling/wall após move programático.
+  // Sem isso, dragObjectTo enviaria lustres pro chão (surface retorna Y=0 sem hit).
+  const anchor = obj.userData?.anchor;
+  if (anchor === 'ceiling' || anchor === 'wall') {
+    applyAnchor(obj, obj.position.clone(), { silent: true });
+  }
+
   physics.update(obj);
   notifySceneChanged();
 

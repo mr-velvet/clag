@@ -1,7 +1,7 @@
 import {
-  bootViewport, on, setGizmoMode, getGizmoMode,
+  scene, bootViewport, on, setGizmoMode, getGizmoMode,
   getSelected, setSelected, removeFromScene, duplicateObject,
-  notifySceneChanged, userRoot,
+  notifySceneChanged, userRoot, addToScene,
 } from './scene.js';
 import { addCube, addSphere, addPlane, addPointLight } from './primitives.js';
 import { initOutliner } from './outliner.js';
@@ -18,7 +18,6 @@ import { initToast, toast } from './toast.js';
 import { saveSceneToLocal, restoreSceneFromLocal } from './persist.js';
 import { loadModelFromUrl } from './loader.js';
 import { providerMap } from './providers/index.js';
-import { addToScene } from './scene.js';
 import { initApi } from './api.js';
 import { createRoom, removeRoom, getRoomDimensions, hasRoom } from './room.js';
 import { initContextualGizmo } from './contextual-gizmo.js';
@@ -173,8 +172,15 @@ $('btn-save').addEventListener('click', () => {
 });
 $('btn-load').addEventListener('click', async () => {
   const ok = await restoreSceneFromLocal(addPrimitiveByKind, downloadAndPlaceFromMeta);
-  if (ok) toast('cena carregada', { kind: 'success' });
-  else toast('nenhuma cena salva', { kind: 'warn' });
+  if (ok) {
+    // Fix Bug 13: após load, matrizes world podem estar stale — atualiza antes
+    // de re-registrar todos os AABBs. Sem isso, AABBs ficam todos na posição errada.
+    scene.updateMatrixWorld(true);
+    physics.registerAll(userRoot);
+    toast('cena carregada', { kind: 'success' });
+  } else {
+    toast('nenhuma cena salva', { kind: 'warn' });
+  }
 });
 
 function addPrimitiveByKind(kind) {
@@ -415,9 +421,10 @@ cube.position.set(-1.5, 0.5, 0);
 const sphere = addSphere();
 sphere.position.set(1.5, 0.6, 0);
 
-// idempotência: garante que todos os objetos da cena starter têm AABB registrado
-// (addToScene já registra, mas qualquer objeto que entrar via persist.load também
-// passa por addToScene — então registerAll é só segurança extra no boot).
+// Fix Bug 13: updateMatrixWorld antes de registerAll garante que setFromObject
+// usa matrices world atualizadas — sem isso, todos os AABBs ficam na posição
+// do primeiro objeto (matrix stale pré-primeiro-render).
+scene.updateMatrixWorld(true);
 physics.registerAll(userRoot);
 
 // deseleciona pra inspector mostrar "nenhum objeto selecionado" no boot
@@ -433,7 +440,12 @@ initApi({
   setActiveProvider,
   getActiveProvider,
   save: () => saveSceneToLocal(),
-  load: async () => await restoreSceneFromLocal(addPrimitiveByKind, downloadAndPlaceFromMeta),
+  load: async () => {
+    // Fix Bug 13: mesma lógica do btn-load — updateMatrixWorld + registerAll pós-restore.
+    const ok = await restoreSceneFromLocal(addPrimitiveByKind, downloadAndPlaceFromMeta);
+    if (ok) { scene.updateMatrixWorld(true); physics.registerAll(userRoot); }
+    return ok;
+  },
   // catalogo
   catalogSearchCategory: searchCategory,
   catalogExpandCategory: expandCategory,
