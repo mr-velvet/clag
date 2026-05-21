@@ -60,6 +60,12 @@ const TUNNEL_MAX_SUBSTEPS = 32;
 const _raycaster = new THREE.Raycaster();
 const _pointer = new THREE.Vector2();
 
+// CR-2 fix (2026-05-21): caches module-level pra _updateLockOverlay.
+// Antes alocava Box3+Vector3+Vector3 a cada frame (60Hz) mesmo sem seleção.
+const _lockBox = new THREE.Box3();
+const _lockCenter = new THREE.Vector3();
+const _lockNdc = new THREE.Vector3();
+
 // modo contextual global — usado por api.js pra saber o modo
 let _contextualMode = true;
 
@@ -88,30 +94,49 @@ export function initContextualGizmo({ container }) {
   // tick inicial — caso boot tenha cena starter
   _updateHintVisibility();
 
-  // Esc durante drag cancela; fora de drag restaura modo contextual
+  // CR-3 fix (2026-05-21): registrado com capture:true pra rodar ANTES do
+  // handler do scene.js (que também escuta Esc → setSelected(null)). Quando
+  // o gizmo consome Esc — drag ativo OU modo transform W/E/R — chama
+  // stopImmediatePropagation() pra impedir TODOS os outros handlers (inclusive
+  // os do mesmo target window que rodam após este). `stopPropagation` não
+  // basta: handlers no MESMO target ainda processam todos numa mesma fase.
+  // Para W/E/R, deixa propagar (scene.js precisa ativar TransformControls).
   window.addEventListener('keydown', ev => {
     if (ev.key === 'Escape') {
       if (_isDragging) {
+        // Esc durante drag: cancela drag mas PRESERVA seleção.
         _cancelDrag();
-      } else {
-        // Fix GIZMO-3: Esc fora de drag restaura modo contextual.
-        // W/E/R ativam TransformControls e setam _contextualMode=false;
-        // Esc desfaz isso devolvendo o drag contextual como modo ativo.
-        _contextualMode = true;
+        ev.stopImmediatePropagation();
+        ev.preventDefault();
+        return;
       }
+      if (!_contextualMode) {
+        // Esc fora de drag mas em modo transform (W/E/R ativos):
+        // volta pro modo contextual, preserva seleção.
+        // Fix GIZMO-3 + CR-3: consome o evento pra scene.js não deselecionar.
+        _contextualMode = true;
+        ev.stopImmediatePropagation();
+        ev.preventDefault();
+        return;
+      }
+      // Se NÃO está em drag e está em modo contextual, deixa scene.js
+      // tratar Esc (deselecionar) — Esc duplo deselect comportamento esperado.
     }
     if ((ev.key === 'w' || ev.key === 'W' ||
          ev.key === 'e' || ev.key === 'E' ||
          ev.key === 'r' || ev.key === 'R') &&
         !(ev.target instanceof HTMLInputElement) &&
         !(ev.target instanceof HTMLTextAreaElement)) {
-      // TransformControls assumindo — contextual fica inativo durante essa sessão
+      // TransformControls assumindo — contextual fica inativo durante essa sessão.
+      // NÃO chamamos stopPropagation: scene.js precisa setar o gizmo mode.
       _contextualMode = false;
     }
-  });
+  }, { capture: true });
 
-  // atualiza posição do cadeado a cada frame via RAF
-  _animateLock();
+  // CR-2 fix (2026-05-21): atualiza cadeado dentro do render loop de scene.js
+  // via hook 'beforeRender'. Antes criava RAF próprio (`_animateLock`) que
+  // rodava eternamente e alocava Box3+Vector3 a cada frame mesmo sem seleção.
+  sceneOn('beforeRender', _updateLockOverlay);
 }
 
 // -------------------- cadeado overlay --------------------
@@ -238,30 +263,39 @@ function _hideHoverBox() {
   _hoverObj = null;
 }
 
+// CR-2 fix (2026-05-21):
+//   - Bail-out cedo se !sel ou !_container (early-return sem alocar nada).
+//   - Cacheia Box3/Vector3/Vector3 module-level (reutiliza mesmas instâncias).
+//   - Quando overlay já está escondido e segue escondido, evita até a chamada
+//     classList.add (curto-circuito barato).
+// Box3.setFromObject ainda é O(meshes) mas só roda quando há seleção visível.
 function _updateLockOverlay() {
   const sel = getSelected();
-  if (!sel || !_container) {
-    _lockEl.classList.add('hidden');
+  if (!sel || !_container || !_lockEl) {
+    // bail-out: só toca DOM se ainda não estava escondido
+    if (_lockEl && !_lockEl.classList.contains('hidden')) {
+      _lockEl.classList.add('hidden');
+    }
     return;
   }
 
-  // projeta o centro do objeto em screen-space
-  const box = new THREE.Box3().setFromObject(sel);
-  const center = box.getCenter(new THREE.Vector3());
+  // projeta o centro do objeto em screen-space — reusa instâncias module-level
+  _lockBox.setFromObject(sel);
+  _lockBox.getCenter(_lockCenter);
 
-  // projetar pra NDC
-  const ndc = center.clone().project(camera);
+  // projetar pra NDC (clona pra _lockNdc pra não destruir _lockCenter)
+  _lockNdc.copy(_lockCenter).project(camera);
+
+  // se atrás da câmera, esconde
+  if (_lockNdc.z > 1) {
+    _lockEl.classList.add('hidden');
+    return;
+  }
 
   // converter pra coordenadas de tela
   const rect = renderer.domElement.getBoundingClientRect();
-  const sx = (ndc.x * 0.5 + 0.5) * rect.width  + rect.left;
-  const sy = (-ndc.y * 0.5 + 0.5) * rect.height + rect.top;
-
-  // se atrás da câmera, esconde
-  if (ndc.z > 1) {
-    _lockEl.classList.add('hidden');
-    return;
-  }
+  const sx = (_lockNdc.x * 0.5 + 0.5) * rect.width  + rect.left;
+  const sy = (-_lockNdc.y * 0.5 + 0.5) * rect.height + rect.top;
 
   const locked = !sel.userData?.freeTransform;
   _lockEl.textContent = locked ? '🔒' : '🔓';
@@ -272,11 +306,6 @@ function _updateLockOverlay() {
   const SIZE = 32;
   _lockEl.style.left = `${sx - SIZE / 2}px`;
   _lockEl.style.top  = `${sy - SIZE / 2 - 20}px`; // 20px acima do centro
-}
-
-function _animateLock() {
-  _updateLockOverlay();
-  requestAnimationFrame(_animateLock);
 }
 
 export function updateLockOverlay() { _updateLockOverlay(); }
@@ -385,42 +414,33 @@ function _onPointerMove(ev) {
   // D.5 — tunneling mitigation: se o delta entre frames é grande (>0.25u em XZ),
   // divide em sub-steps pra que o sweep XZ rode em cada passo intermediário.
   //
-  // Patch GIZMO-D4-1 (drag visual + programático):
-  //   1. Surface-snap roda APENAS no step final. Steps intermediários mantêm
-  //      Y fixo (não deixa o objeto "escalar" obstáculo no caminho do drag).
-  //      Antes: sub-step subia Y pro topo do obstáculo → yOverlap zerava
-  //      → sweep liberava → objeto atravessava. Agora bloqueia em XZ.
-  //   2. Pré-check de empilhamento: se target final cai em cima de outro
-  //      objeto (surface-snap retorna Y > 0), pula sub-steps e vai direto
-  //      pro snap final. Empilhamento via drag rápido continua funcionando.
-  //   3. Early-abort em sub-step bloqueado: evita teleport-push do slide
-  //      quando target intermediário cai DENTRO do AABB do obstáculo.
-  const finalSurface = physics.surfaceUnder(_dragObj, targetXZ, userRoot);
-  const isStackingTarget = !!(finalSurface && finalSurface.y > 0.001);
+  // Patch QA-1 (wave-a1, 2026-05-21):
+  //   - Removido o atalho `isStackingTarget` que pulava sub-steps quando o
+  //     target XZ caía em cima de outro objeto. Esse atalho fazia o objeto
+  //     "escalar" obstáculos em drag horizontal (cube indo pra (1.5,0) com
+  //     sphere em (1.5,0.6,0) terminava em Y=1.7 empilhado).
+  //   - Surface-snap continua só no step final, mas agora protegido por
+  //     clamp XZ com Y atual ANTES de aplicar (ver _applyDragStep).
+  //   - Anchor=ceiling/wall bypassa surface-snap (Patch QA-2).
+  const stepsXZ = _calcSubSteps(_lastTargetXZ, targetXZ);
+  const fixedY = _dragObj.position.y;
   let lastBlocked = false;
-
-  if (isStackingTarget) {
-    lastBlocked = _applyDragStep(_dragObj, targetXZ, { snapSurface: true });
-  } else {
-    const stepsXZ = _calcSubSteps(_lastTargetXZ, targetXZ);
-    const fixedY = _dragObj.position.y;
-    for (let i = 1; i <= stepsXZ; i++) {
-      const t = i / stepsXZ;
-      const sub = new THREE.Vector3(
-        _lastTargetXZ.x + (targetXZ.x - _lastTargetXZ.x) * t,
-        0,
-        _lastTargetXZ.z + (targetXZ.z - _lastTargetXZ.z) * t,
-      );
-      const isFinal = (i === stepsXZ);
-      const stepBlocked = _applyDragStep(_dragObj, sub, { snapSurface: isFinal, fixedY });
-      lastBlocked = stepBlocked || lastBlocked;
-      if (!isFinal && stepBlocked) {
-        // Aborta sub-steps subsequentes ao detectar bloqueio e roda
-        // surface-snap na posição corrente. Evita que slide com penetração
-        // total teleporte o objeto pro outro lado do obstáculo.
-        _applyDragStep(_dragObj, new THREE.Vector3(_dragObj.position.x, 0, _dragObj.position.z), { snapSurface: true });
-        break;
-      }
+  for (let i = 1; i <= stepsXZ; i++) {
+    const t = i / stepsXZ;
+    const sub = new THREE.Vector3(
+      _lastTargetXZ.x + (targetXZ.x - _lastTargetXZ.x) * t,
+      0,
+      _lastTargetXZ.z + (targetXZ.z - _lastTargetXZ.z) * t,
+    );
+    const isFinal = (i === stepsXZ);
+    const stepBlocked = _applyDragStep(_dragObj, sub, { snapSurface: isFinal, fixedY });
+    lastBlocked = stepBlocked || lastBlocked;
+    if (!isFinal && stepBlocked) {
+      // Aborta sub-steps subsequentes ao detectar bloqueio e roda
+      // surface-snap na posição corrente. Evita que slide com penetração
+      // total teleporte o objeto pro outro lado do obstáculo.
+      _applyDragStep(_dragObj, new THREE.Vector3(_dragObj.position.x, 0, _dragObj.position.z), { snapSurface: true });
+      break;
     }
   }
   _lastTargetXZ = targetXZ.clone();
@@ -442,20 +462,45 @@ function _onPointerMove(ev) {
 //   - true (default ou step final): comportamento clássico (surface + sweep).
 //   - false (steps intermediários de drag rápido): usa `opts.fixedY` como Y do
 //     candidato. Evita que sub-step "escale" obstáculo no caminho do drag.
+//
+// Patch QA-1/QA-2 (wave-a1, 2026-05-21):
+//   - Step final (snapSurface=true): faz CLAMP XZ com Y atual primeiro. Só
+//     aplica surface-snap se o XZ resultante == target (sem bloqueio). Se
+//     bloqueou, mantém Y atual no XZ clampeado — evita "escalar" obstáculo.
+//   - Anchor=ceiling/wall: bypassa surface-snap em qualquer step. O objeto
+//     fica preso à altura corrente; applyAnchor reposiciona Y no fim do drag
+//     (já existia em _onPointerUp/dragObjectTo).
 function _applyDragStep(obj, targetXZ, opts = {}) {
   const snapSurface = opts.snapSurface !== false; // default true (retrocompat)
+  const anchor = obj.userData?.anchor;
+  const anchorBypass = (anchor === 'ceiling' || anchor === 'wall');
 
   let finalY;
-  if (snapSurface) {
-    // D.4: ordem invertida — surface primeiro, sweep depois.
-    const surface = physics.surfaceUnder(obj, targetXZ, userRoot);
+  if (snapSurface && !anchorBypass) {
+    // Step final padrão: primeiro CLAMP XZ no Y atual pra checar se há obstáculo
+    // horizontal no caminho. Só aplica surface-snap (subir/descer Y) se o XZ
+    // resultou no target (sem bloqueio). Sem esse guard, surface-snap subia o
+    // objeto pro topo do obstáculo e o sweep liberava (yOverlap=false → cola
+    // por cima). Fix QA-1: bloqueio horizontal venceria empilhamento por drag.
+    const currentY = obj.position.y;
+    const probe = physics.sweepXZ(obj, targetXZ, userRoot, { candidateY: currentY });
+    const blockedHorizontal = !!probe.blocked;
 
-    // Fix Bug 11: compensa offset entre pivot e base do bbox.
+    if (blockedHorizontal) {
+      // Mantém Y atual no XZ clampeado pelo sweep — não escala obstáculo.
+      finalY = currentY;
+      obj.position.set(probe.x, finalY, probe.z);
+      physics.update(obj);
+      return true;
+    }
+
+    // XZ livre nesse Y: surface-snap pode rebaixar/elevar com segurança.
+    const surface = physics.surfaceUnder(obj, targetXZ, userRoot);
     const currentBox = new THREE.Box3().setFromObject(obj);
     const baseOffset = obj.position.y - currentBox.min.y;
     finalY = (surface ? surface.y : 0) + baseOffset;
   } else {
-    // Step intermediário: Y herdado do start do drag (não tenta escalar obstáculo).
+    // Step intermediário OU anchor=ceiling/wall: Y herdado, sem surface-snap.
     finalY = (opts.fixedY != null) ? opts.fixedY : obj.position.y;
   }
 
@@ -598,43 +643,28 @@ export function dragObjectTo(obj, targetXZ, userRoot_) {
     return obj.position.clone();
   }
 
-  // D.5 tunneling mitigation + patch GIZMO-D4-1 (espelha _onPointerMove):
-  //   1. Surface-snap só no step final — sub-steps intermediários mantêm Y
-  //      fixo, evita "escalar" obstáculos em drag rápido.
-  //   2. Pré-check de empilhamento: se target final é em cima de outro objeto,
-  //      atalho pro snap final (empilhamento programático preserva semântica).
-  //   3. Early-abort em sub-step bloqueado: evita teleport-push do slide.
-  // Também documenta GIZMO-D4-2 (comportamento esperado): se target XZ cai
-  // dentro do AABB de outro objeto, o pré-check planta em cima — é
-  // empilhamento intencional, não bug. Slide manual ocorre só quando o
-  // target XZ está FORA do AABB do outro objeto.
+  // D.5 tunneling mitigation + patch QA-1 (wave-a1, 2026-05-21):
+  //   - Removido o atalho `isStackingTarget` (era teleport pra topo de outro
+  //     obj quando target XZ caía dentro do AABB dele). Empilhamento via drag
+  //     deixa de ser implícito — usuário precisa largar o obj com Y livre.
+  //   - Surface-snap só no step final; step final é protegido por clamp XZ
+  //     no Y atual (ver _programmaticStep).
+  //   - Anchor=ceiling/wall bypassa surface-snap (Patch QA-2).
   const fromXZ = new THREE.Vector3(obj.position.x, 0, obj.position.z);
-  const finalSurface = physics.surfaceUnder(obj, target, root);
-  const isStackingTarget = !!(finalSurface && finalSurface.y > 0.001);
-
-  if (isStackingTarget) {
-    // Atalho: vai direto pro target final (surface-snap empilha em cima).
-    _programmaticStep(obj, target, root, { snapSurface: true });
-  } else {
-    // Caminho normal: sub-steps com Y fixo. Surface-snap só no final.
-    // Se sub-step intermediário fica bloqueado, aborta trajetória e roda
-    // snap final na posição parada — evita teleport-push do slide quando
-    // o target cai DENTRO do AABB do obstáculo.
-    const steps = _calcSubSteps(fromXZ, target);
-    const fixedY = obj.position.y;
-    for (let i = 1; i <= steps; i++) {
-      const t = i / steps;
-      const sub = new THREE.Vector3(
-        fromXZ.x + (target.x - fromXZ.x) * t,
-        0,
-        fromXZ.z + (target.z - fromXZ.z) * t,
-      );
-      const isFinal = (i === steps);
-      const result = _programmaticStep(obj, sub, root, { snapSurface: isFinal, fixedY });
-      if (!isFinal && result?.blocked) {
-        _programmaticStep(obj, new THREE.Vector3(obj.position.x, 0, obj.position.z), root, { snapSurface: true });
-        break;
-      }
+  const steps = _calcSubSteps(fromXZ, target);
+  const fixedY = obj.position.y;
+  for (let i = 1; i <= steps; i++) {
+    const t = i / steps;
+    const sub = new THREE.Vector3(
+      fromXZ.x + (target.x - fromXZ.x) * t,
+      0,
+      fromXZ.z + (target.z - fromXZ.z) * t,
+    );
+    const isFinal = (i === steps);
+    const result = _programmaticStep(obj, sub, root, { snapSurface: isFinal, fixedY });
+    if (!isFinal && result?.blocked) {
+      _programmaticStep(obj, new THREE.Vector3(obj.position.x, 0, obj.position.z), root, { snapSurface: true });
+      break;
     }
   }
 
@@ -654,14 +684,27 @@ export function dragObjectTo(obj, targetXZ, userRoot_) {
 // D.5 — versão "stateless" do step pro caminho programático
 // (não toca em _container/classList; só executa surface+sweep).
 //
-// Patch GIZMO-D4-1: `opts.snapSurface` controla se surface-snap roda neste
-// step. `false` (sub-step intermediário) → usa `opts.fixedY` como Y do
-// candidato, evitando que o objeto escale obstáculos durante o trajeto.
+// Patch QA-1/QA-2 (wave-a1, 2026-05-21): espelha _applyDragStep.
+//   - Step final: clamp XZ no Y atual primeiro. Surface-snap só se XZ livre.
+//   - Anchor=ceiling/wall: bypassa surface-snap (Y herdado).
 function _programmaticStep(obj, target, root, opts = {}) {
   const snapSurface = opts.snapSurface !== false;
+  const anchor = obj.userData?.anchor;
+  const anchorBypass = (anchor === 'ceiling' || anchor === 'wall');
 
   let finalY;
-  if (snapSurface) {
+  if (snapSurface && !anchorBypass) {
+    // Patch QA-1: clamp XZ no Y atual primeiro. Se bloqueou horizontalmente,
+    // não sobe pra topo do obstáculo — fica preso no Y atual no XZ clampeado.
+    const currentY = obj.position.y;
+    const probe = physics.sweepXZ(obj, target, root, { candidateY: currentY });
+    if (probe.blocked) {
+      obj.position.set(probe.x, currentY, probe.z);
+      physics.update(obj);
+      return { blocked: true };
+    }
+
+    // XZ livre — pode aplicar surface-snap.
     const surface = physics.surfaceUnder(obj, target, root);
     const currentBox = new THREE.Box3().setFromObject(obj);
     const baseOffset = obj.position.y - currentBox.min.y;

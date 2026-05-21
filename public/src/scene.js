@@ -3,6 +3,11 @@ import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { TransformControls } from 'three/addons/controls/TransformControls.js';
 import * as snap from './snap.js';
 import * as physics from './physics.js';
+// CR-3 (2026-05-21): consulta estado do gizmo contextual pra Esc não
+// desselecionar quando contextual está em drag ou usuário está saindo
+// de modo W/E/R. Import dinâmico evita ciclo de dependência (contextual
+// importa scene).
+import * as _cg from './contextual-gizmo.js';
 
 // world singletons (exported for other modules)
 export const scene = new THREE.Scene();
@@ -30,6 +35,10 @@ const listeners = {
   selectionChanged: new Set(),
   sceneChanged: new Set(),
   statsTick: new Set(),
+  // CR-2 fix (2026-05-21): hook do render loop — outros módulos (cadeado overlay,
+  // helpers visuais) se inscrevem aqui em vez de criar RAF próprio. Evita
+  // múltiplos RAFs concorrentes e centraliza o tick.
+  beforeRender: new Set(),
 };
 
 export function on(event, cb) {
@@ -177,6 +186,8 @@ export function bootViewport(container) {
   // tick
   function tick() {
     orbit.update();
+    // CR-2: notifica subscribers antes do render (cadeado overlay etc.)
+    for (const cb of listeners.beforeRender) cb();
     renderer.render(scene, camera);
     frameCount++;
     const now = performance.now();
@@ -208,7 +219,16 @@ export function bootViewport(container) {
     } else if (ev.key === 'f' || ev.key === 'F') {
       if (selected) frameSelected();
     } else if (ev.key === 'Escape') {
-      setSelected(null);
+      // CR-3 fix (2026-05-21): se modo contextual está OFF (W/E/R ativos),
+      // ou se há drag em curso, deixa o handler do contextual-gizmo lidar com
+      // Esc (cancela drag / volta pro modo contextual) sem perder seleção.
+      // Esc só deseleciona quando estamos genuinamente em modo contextual idle.
+      const inContextual = _cg && typeof _cg.isContextualMode === 'function'
+        ? _cg.isContextualMode()
+        : true;
+      if (inContextual) {
+        setSelected(null);
+      }
     }
   });
 }

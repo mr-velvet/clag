@@ -39,6 +39,18 @@ export function unregister(obj) {
   _store.delete(obj.userData.sceneId);
 }
 
+// Esvazia o store inteiro. Usado por persist.js antes de repopular userRoot
+// (CR-1 fix 2026-05-21 — antes o loop de clear bypassava removeFromScene e
+// vazava AABBs no _store, criando colisores invisíveis em sessões longas).
+export function clear() {
+  _store.clear();
+}
+
+// Introspecção pra QA — não usar em prod.
+export function _storeSize() {
+  return _store.size;
+}
+
 // recalcula AABB de um objeto já registrado
 export function update(obj) {
   if (!obj?.userData?.sceneId) return;

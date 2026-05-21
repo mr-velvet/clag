@@ -1,6 +1,7 @@
 import * as THREE from 'three';
-import { getUserObjects, addToScene, userRoot } from './scene.js';
+import { getUserObjects, addToScene, userRoot, removeFromScene } from './scene.js';
 import { createRoom, getRoomDimensions, isRoomPart } from './room.js';
+import * as physics from './physics.js';
 
 const STORAGE_KEY = 'clag:scene-v1';
 
@@ -89,8 +90,17 @@ export async function restoreSceneFromLocal(addPrimitive, downloadAndPlaceMeta) 
   let data;
   try { data = JSON.parse(raw); } catch { return false; }
   if (!data?.objects) return false;
-  // we clear current userRoot to load
-  while (userRoot.children.length) userRoot.remove(userRoot.children[0]);
+  // Clear current userRoot — usa removeFromScene (que dispara physics.unregister
+  // + dispose de geometry/material) pra cada child. Fix CR-1 (2026-05-21):
+  // antes o loop `userRoot.remove(...)` direto vazava AABBs no _store de physics,
+  // criando colisores invisíveis em load/save loops. Belt-and-suspenders: também
+  // chama physics.clear() no fim pra garantir Map vazio caso algum child escape
+  // (ex: helpers órfãos sem sceneId nunca registrados via register()).
+  const toRemove = [...userRoot.children];
+  for (const child of toRemove) {
+    removeFromScene(child);
+  }
+  physics.clear();
   // Fase 4: recria sala primeiro (se houver) — assim anchor='ceiling' /
   // 'wall' nos assets seguintes encontra room:ceiling / room:wall reais.
   if (data.room && Number.isFinite(data.room.width) && Number.isFinite(data.room.depth) && Number.isFinite(data.room.height)) {
