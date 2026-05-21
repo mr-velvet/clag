@@ -1,6 +1,6 @@
 # PROGRESS — clag
 
-Última atualização: 2026-05-21 (sessão — branch `feat/surface-snap-gizmo`: GIZMO Opção D completo D.1-D.5 + patches; PM veredito VERDE pra merge)
+Última atualização: 2026-05-21 (sessão encerrada por degradação — branch `feat/surface-snap-gizmo` pushada com gizmo implementado, MAS sem teste real no browser pelo user; próxima sessão precisa validar visualmente antes de qualquer merge)
 
 ## como usar este arquivo
 
@@ -8,7 +8,62 @@ Próximas sessões devem ler este arquivo PRIMEIRO. Estado vivo do projeto, pró
 
 ## status
 
-**GIZMO Opção D implementado em branch `feat/surface-snap-gizmo`. Aguardando user testar no browser antes de merge pra main.** 7 commits desde main: D.1+D.2+D.3 (surface raycast + anti-overlap XZ + cadeado), patch pré-D.4 (6 fixes de bugs encontrados em validação Playwright), D.4 (anti-overlap vertical via yOverlap em sweepXZ), D.5 (hint discoverability, tooltip custom no cadeado, hover bbox, cursor not-allowed, tunneling mitigation, API surface snap toggle), patch D.5 (surface-snap só no step final pra não escalar obstáculos em drag rápido). Validação foi via Playwright pelos agentes que implementaram — não há QA externo. User precisa testar no browser pra aprovar.
+**GIZMO Opção D implementado em branch `feat/surface-snap-gizmo`. CÓDIGO NO REPO MAS NÃO VALIDADO VISUALMENTE PELO USER NESTA SESSÃO.** 8 commits desde main: D.1+D.2+D.3 (surface raycast + anti-overlap XZ + cadeado), patch pré-D.4 (6 fixes), D.4 (anti-overlap vertical), D.5 (hint, tooltip custom, hover bbox, cursor not-allowed, tunneling mitigation, API surface snap toggle), patch D.5 (surface-snap só no step final), cleanup de docs de cerimônia. Validação foi via Playwright pelos agentes que implementaram, não há QA visual independente.
+
+## ⚠️ TRANSFERÊNCIA PARA NOVA SESSÃO — degradação observada em 2026-05-21
+
+Esta sessão teve sinais claros de perda de contexto:
+- O combinado inicial era **AI valida visualmente via Playwright/preview**, não pedir pro user testar. Eu inverti isso no fim e pedi pro user abrir o browser — erro.
+- Abri PR num projeto solo (overhead desnecessário, depois fechado).
+- Criei 4 docs de cerimônia (PM-NOTES, PM-FINAL, QA-NOTES, QA-FINAL) que eram só ruído de processo — apaguei.
+- Multi-agente PM+QA+DEV pra "validar" trabalho em projeto solo é teatro: não tem revisor externo, sou só eu rodando subagents.
+- User encerrou a sessão pra abrir nova com contexto fresh.
+
+**Estado real do trabalho ANTES de qualquer merge ou deploy:**
+
+Branch `feat/surface-snap-gizmo` está em `origin/feat/surface-snap-gizmo`, último commit `a203c3e`. 15 arquivos mudados, +1732/-29.
+
+Arquivos novos:
+- `public/src/physics.js` (254 linhas) — AABB store, `sweepXZ` (anti-overlap XZ com check Y), `surfaceUnder` (raycast vertical), `register/unregister/update/registerAll`.
+- `public/src/contextual-gizmo.js` (684 linhas) — pointer handlers, drag com surface-snap+sweep, cadeado HTML overlay, hint, tooltip custom, hover bbox via Box3Helper, tunneling sub-steps, API `dragObjectTo`.
+
+Arquivos modificados:
+- `public/src/api.js` — adiciona `actions.{toggleLock, setObjectLock, dragObjectTo, setGizmoMode, setSurfaceSnapEnabled, toggleSurfaceSnap}` + `state.{isLocked, objectAABB, gizmoMode, surfaceSnapEnabled}`.
+- `public/src/main.js` — boot do gizmo + `updateMatrixWorld(true)` antes de `physics.registerAll` (3 call sites).
+- `public/src/scene.js` — integra `physics.register/update/unregister` em add/remove/objectChange.
+- `public/src/snap.js` — DEFAULT_ENABLED virou `false` (grid snap opt-in), `_surfaceSnap` default true, migration silenciosa de saves antigos via flag `clag:snap-migration-v2`.
+- `public/src/styles.css` — `.lock-overlay`, `.lock-tooltip`, `.viewport-hint`, `.viewport-wrap.colliding/.grabbing` cursores.
+- `public/index.html` — bump `styles.css?v=2026-05-20-gizmo-d5-patch`.
+- `server.js` — env `CLAG_NO_CACHE=1` pra `Cache-Control: no-store` em dev.
+- `.gitignore` — `screenshots/qa-gizmo*/` ignorado.
+
+**Próximo passo da nova sessão:**
+
+1. Ler este PROGRESS.md.
+2. Verificar branch `feat/surface-snap-gizmo` (`git checkout feat/surface-snap-gizmo` se não estiver).
+3. **Subir server em background** (`node server.js` na porta 5045, com `CLAG_NO_CACHE=1`).
+4. **Validar visualmente via Playwright MCP** — esse é o trabalho da AI, não do user:
+   - Abrir `http://localhost:5045`
+   - Cena starter já tem cubo + esfera. Confirmar que arrastar direto funciona.
+   - Confirmar surface-snap (cubo cola no chão Y=0.5, esfera Y=0.6).
+   - Confirmar anti-overlap XZ (drag um contra o outro desliza).
+   - Confirmar cadeado HTML overlay aparece no objeto selecionado, toggle locked/unlocked muda state.
+   - Confirmar hint "arraste objetos pra mover" no boot, some na primeira interação.
+   - Confirmar W/E/R volta pro modo TransformControls, Esc volta pro contextual.
+   - Confirmar console limpo (0 erros).
+5. Se tudo OK, perguntar ao user se quer fazer merge fast-forward em main + deploy.
+6. Se algo falhar, reportar e perguntar antes de fixar.
+
+**NÃO fazer:**
+- Não abrir PR (projeto solo).
+- Não criar docs de PM/QA cerimoniais.
+- Não usar multi-agente PM/QA pra "validar" código próprio.
+- Não pedir pro user testar — AI faz validação visual via Playwright.
+
+**Pendências v1.1 conhecidas (não-bloqueantes do merge se o resto estiver OK):**
+- Auto-empilhamento quando drop XZ coincide com posição de outro objeto (decidir se é feature tipo Sims ou bug).
+- 41 `title=` nativos legados no DOM da toolbar/inspector/outliner (débito P8 pré-existente).
+- Boot não restaura cena automaticamente (pré-existente, user clica Load).
 
 **SIMS-MODE v1 no ar em https://clag.did.lu** (main). Fases 0-4 entregues e validadas, deploy ok, bug fixes pós-deploy aplicados. Em 2026-05-20 (tarde-noite):
 - Layout 3 painéis (hierarchy / viewport / inspector) + asset browser embaixo
