@@ -1,6 +1,6 @@
 # PROGRESS — clag
 
-Última atualização: 2026-05-21 (revisão tripla + Wave A + Wave B + DEBT-2 boot autoload executadas. Branch `feat/surface-snap-gizmo` agora pronto pra merge: 12 commits desde main, 5 ALTAs + 12 MÉDIAs + QA-3 + DEBT-2 fixados. Aguardando deploy.)
+Última atualização: 2026-05-21 (revisão tripla + Wave A + Wave B + DEBT-2 boot autoload + merge + deploy. Gizmo D **EM PRODUÇÃO** em https://clag.did.lu. Smoke test pós-deploy passou. Aguardando teste real do user.)
 
 ## como usar este arquivo
 
@@ -8,7 +8,7 @@ Próximas sessões devem ler este arquivo PRIMEIRO. Estado vivo do projeto, pró
 
 ## status
 
-**GIZMO Opção D pronto pra merge + deploy. Branch `feat/surface-snap-gizmo` com 12 commits desde main, 5 ALTAs + 12 MÉDIAs + QA-3 + DEBT-2 (boot autoload) resolvidos.** 8 commits desde main: D.1+D.2+D.3 (surface raycast + anti-overlap XZ + cadeado), patch pré-D.4 (6 fixes), D.4 (anti-overlap vertical), D.5 (hint, tooltip custom, hover bbox, cursor not-allowed, tunneling mitigation, API surface snap toggle), patch D.5 (surface-snap só no step final), cleanup de docs de cerimônia. Veredito final: ver [docs/PROPOSALS-2026-05-21.md](./docs/PROPOSALS-2026-05-21.md).
+**GIZMO Opção D EM PRODUÇÃO em https://clag.did.lu (deploy 2026-05-21 17:16 UTC, commit a458a88).** 12 commits desde 017a696 (PROPOSALS), 5 ALTAs + 12 MÉDIAs + QA-3 + DEBT-2 (boot autoload) resolvidos. Smoke test em prod passou (drag programático, anti-overlap, Y preservation, console limpo, cache headers corretos). Branch `feat/surface-snap-gizmo` mergeada fast-forward em main. 8 commits desde main: D.1+D.2+D.3 (surface raycast + anti-overlap XZ + cadeado), patch pré-D.4 (6 fixes), D.4 (anti-overlap vertical), D.5 (hint, tooltip custom, hover bbox, cursor not-allowed, tunneling mitigation, API surface snap toggle), patch D.5 (surface-snap só no step final), cleanup de docs de cerimônia. Veredito final: ver [docs/PROPOSALS-2026-05-21.md](./docs/PROPOSALS-2026-05-21.md).
 
 ## ⚠️ Revisão 2026-05-21 — achados ALTA bloqueando merge
 
