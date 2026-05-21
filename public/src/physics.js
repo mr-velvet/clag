@@ -1,4 +1,4 @@
-// physics.js — AABB store + sweep test XZ + surface raycast (D.1 + D.2)
+// physics.js — AABB store + sweep test XZ + surface raycast (D.1 + D.2 + D.4)
 //
 // Não é uma engine de física. É um store de bounding boxes axis-aligned com
 // dois algoritmos simples: sweep no plano XZ (anti-overlap) e raycast pra
@@ -6,6 +6,12 @@
 //
 // Objetos registrados: todos em userRoot que não são room:* nem isHelper.
 // AABB é recalculado via update(obj) quando transform muda.
+//
+// D.4 — anti-overlap vertical: sweepXZ agora checa yOverlap antes de bloquear.
+// Se o AABB candidato passa POR CIMA (ou POR BAIXO) do outro objeto sem
+// sobreposição vertical, não bloqueia. Permite empilhamento (objeto sobre
+// objeto), passagem por cima de obstáculos baixos, lustres no teto sem
+// colidir com móveis no chão. Mantém bloqueio quando há overlap real em Y.
 //
 // Limitações conhecidas (TODO D.5):
 //   - AABB não rotaciona com o objeto (axis-aligned = sempre alinhado ao mundo)
@@ -96,7 +102,7 @@ export function surfaceUnder(obj, targetXZ, userRoot) {
   return { y: h.point.y, hitObj: h.object };
 }
 
-// -------------------- sweep XZ (D.2) --------------------
+// -------------------- sweep XZ + yOverlap (D.2 + D.4) --------------------
 
 // Testa posição candidata de `obj` contra todos os outros AABBs.
 // Retorna a posição final no plano XZ (sem mudar Y) — pode ser a posição
@@ -104,11 +110,16 @@ export function surfaceUnder(obj, targetXZ, userRoot) {
 //
 // Algoritmo simples de slide:
 //   1. Calcula AABB candidato (translada AABB atual pra targetPos)
-//   2. Para cada outro objeto, testa intersecção
-//   3. Se intersecta: calcula penetração em X e Z separadamente
+//   2. Para cada outro objeto, testa intersecção em X, Z **e Y** (D.4)
+//   3. Se há overlap nos 3 eixos: calcula penetração em X e Z separadamente
 //   4. Desloca no eixo com MENOR penetração (slide pelo eixo "mais livre")
 //   5. Repete com posição ajustada (1 iteração — suficiente pra N<100)
-export function sweepXZ(obj, targetPos, userRoot) {
+//
+// D.4: yOverlap check resolve "passar por cima". O AABB candidato usa o Y
+// atual do objeto (que pode ter sido elevado por surface-snap no frame
+// anterior). Se intervalos Y não se cruzam, o objeto passa livre verticalmente
+// — empilhamento e travessia aérea funcionam naturalmente.
+export function sweepXZ(obj, targetPos, userRoot, opts = {}) {
   const myId = obj?.userData?.sceneId;
   if (!myId) return targetPos.clone();
 
@@ -121,7 +132,7 @@ export function sweepXZ(obj, targetPos, userRoot) {
 
   const delta = new THREE.Vector3(
     targetPos.x - currentCenter.x,
-    0, // não mexe Y aqui — Y é controlado pelo surfaceUnder
+    0, // Y é controlado externamente — translação Y vem via opts.candidateY (D.4)
     targetPos.z - currentCenter.z,
   );
 
@@ -131,6 +142,19 @@ export function sweepXZ(obj, targetPos, userRoot) {
   candidateBox.max.x += delta.x;
   candidateBox.min.z += delta.z;
   candidateBox.max.z += delta.z;
+
+  // D.4: se chamador informou candidateY (Y onde o pivot do obj VAI ficar
+  // pós-surface-snap), translada o AABB em Y antes do teste de overlap.
+  // Sem isso, yOverlap usa o Y atual do obj (frame anterior) e bloqueia
+  // empilhamento. baseOffset = pivot - aabb.min.y; aabb.min.y candidato =
+  // candidateY - baseOffset; deltaY = aabb.min.y candidato - aabb.min.y atual.
+  if (typeof opts.candidateY === 'number') {
+    const baseOffset = obj.position.y - myEntry.box.min.y;
+    const candidateMinY = opts.candidateY - baseOffset;
+    const deltaY = candidateMinY - myEntry.box.min.y;
+    candidateBox.min.y += deltaY;
+    candidateBox.max.y += deltaY;
+  }
 
   // resultado final começa em targetPos e vai sendo corrigido
   let finalX = targetPos.x;
@@ -149,17 +173,25 @@ export function sweepXZ(obj, targetPos, userRoot) {
     const otherHeight = other.max.y - other.min.y;
     if (otherHeight < 0.05) continue;
 
-    // expand other por tolerância pra evitar self-stick
+    // expand other por tolerância em XZ pra evitar self-stick.
+    // Em Y a tolerância vai pro outro lado (encolhe), pra permitir que
+    // objetos ENCOSTEM verticalmente (empilhamento) sem o sistema considerar
+    // overlap. Sem isso, base do topo tangencia topo do base e bloqueia.
     const otherExp = other.clone();
     otherExp.min.x -= TOLERANCE;
     otherExp.min.z -= TOLERANCE;
     otherExp.max.x += TOLERANCE;
     otherExp.max.z += TOLERANCE;
+    otherExp.min.y += TOLERANCE;
+    otherExp.max.y -= TOLERANCE;
 
-    // intersecção apenas em XZ (ignora Y) — sweep é só horizontal
+    // D.4: intersecção nos 3 eixos. Sem overlap em Y -> objeto passa por
+    // cima/baixo sem colidir (empilhamento, travessia aérea). candidateBox.min.y
+    // / max.y refletem o Y candidato (pós-surface-snap) injetado via opts.candidateY.
     const xOverlap = candidateBox.min.x < otherExp.max.x && candidateBox.max.x > otherExp.min.x;
     const zOverlap = candidateBox.min.z < otherExp.max.z && candidateBox.max.z > otherExp.min.z;
-    if (!xOverlap || !zOverlap) continue;
+    const yOverlap = candidateBox.min.y < otherExp.max.y && candidateBox.max.y > otherExp.min.y;
+    if (!xOverlap || !zOverlap || !yOverlap) continue;
 
     // há colisão — calcula penetração em X e Z
     const penX = Math.min(

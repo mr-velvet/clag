@@ -12,8 +12,15 @@ app.use((req, _res, next) => {
 
 app.get('/api/health', (_req, res) => res.json({ status: 'ok', service: 'clag' }));
 
+// CLAG_NO_CACHE=1 desliga cache (útil em dev/QA pra forçar re-fetch de JS/CSS).
+const NO_CACHE = process.env.CLAG_NO_CACHE === '1';
+
 app.use(express.static(path.join(__dirname, 'public'), {
   setHeaders: (res, filePath) => {
+    if (NO_CACHE) {
+      res.setHeader('Cache-Control', 'no-store');
+      return;
+    }
     if (filePath.endsWith('.html')) {
       res.setHeader('Cache-Control', 'no-cache');
     } else {

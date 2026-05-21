@@ -241,13 +241,14 @@ function _onPointerMove(ev) {
 
   // calcula ponto no plano XZ sob o cursor
   const worldPoint = worldPointAtScreen(ev.clientX, ev.clientY);
-
-  // sweep XZ — anti-overlap (D.2)
   const targetXZ = new THREE.Vector3(worldPoint.x, 0, worldPoint.z);
-  const swept    = physics.sweepXZ(_dragObj, targetXZ, userRoot);
 
-  // surface raycast — snap-to-surface (D.1)
-  const surface  = physics.surfaceUnder(_dragObj, swept, userRoot);
+  // D.4: ordem invertida — surface primeiro, sweep depois.
+  // surface decide o Y candidato (baseado no XZ raw sob o cursor); sweep usa
+  // esse Y no AABB candidato pra decidir overlap. Sem isso, sweep usa Y atual
+  // do obj e bloqueia lateralmente mesmo quando o cursor aponta pra cima de
+  // outro objeto (impede empilhamento).
+  const surface  = physics.surfaceUnder(_dragObj, targetXZ, userRoot);
 
   // Fix Bug 11: compensa offset entre pivot e base do bbox.
   // surface.y indica onde a BASE do objeto deve ficar; o pivot pode estar
@@ -255,6 +256,11 @@ function _onPointerMove(ev) {
   const _currentBox = new THREE.Box3().setFromObject(_dragObj);
   const _baseOffset = _dragObj.position.y - _currentBox.min.y; // pivot -> base
   const finalY = (surface ? surface.y : 0) + _baseOffset;
+
+  // sweep XZ — anti-overlap (D.2 + D.4 yOverlap).
+  // Passa candidateY (Y final, pós-surface) pro sweep ajustar o AABB candidato
+  // antes do teste de intersecção vertical.
+  const swept = physics.sweepXZ(_dragObj, targetXZ, userRoot, { candidateY: finalY });
 
   // aplica posição
   _dragObj.position.set(swept.x, finalY, swept.z);
@@ -366,14 +372,17 @@ export function dragObjectTo(obj, targetXZ, userRoot_) {
     return obj.position.clone();
   }
 
-  const swept   = physics.sweepXZ(obj, target, root);
-  const surface = physics.surfaceUnder(obj, swept, root);
+  // D.4: ordem invertida (ver comentário em _onPointerMove) — surface primeiro,
+  // sweep com candidateY depois. Empilhamento e travessia aérea dependem disso.
+  const surface = physics.surfaceUnder(obj, target, root);
 
   // Fix Bug 11: compensa offset entre pivot e base do bbox (mesma lógica do drag visual).
   // surface.y é onde a BASE deve pousar; ajusta Y para que aabb.min.y caia exatamente aí.
   const currentBox = new THREE.Box3().setFromObject(obj);
   const baseOffset = obj.position.y - currentBox.min.y;
   const finalY = (surface ? surface.y : 0) + baseOffset;
+
+  const swept = physics.sweepXZ(obj, target, root, { candidateY: finalY });
 
   obj.position.set(swept.x, finalY, swept.z);
 
